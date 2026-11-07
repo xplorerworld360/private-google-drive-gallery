@@ -1,47 +1,39 @@
-# Private Google Drive Gallery — Password Login
+# Private Google Drive Gallery — Swipe Viewer + Password Login
 
-This version restores the original password-protected gallery and Google Drive Service Account connection.
+## What this version includes
+- Original password-only login (no Google OAuth sign-in)
+- Read-only Service Account connection to Google Drive
+- Clean, compact gallery interface
+- Album selection, filename search and sorting
+- Swipe left/right on touch devices
+- Previous/next arrows and keyboard arrow navigation
+- Click image to open immersive viewer
+- Thumbnail strip for direct image selection
+- Download original image from viewer
+- Favourites toggle within the current viewer session
+- Page through larger collections
+- Manage files and folders directly in Google Drive
 
-## What remains in the app
-- Modern dark gallery interface
-- Album folders and album filter
-- Filename search
-- Sort by newest, oldest, name
-- Comfortable and compact grid
-- Image preview and downloads
-- Session-only favourites
-- Pagination
-- Private password login
-- Refresh gallery button
+## Fix for SSL RECORD_LAYER_FAILURE
+This version replaces the Google API client's older httplib2 transport with Google's `AuthorizedSession` using Requests. It includes HTTPS retries, explicit timeouts and certifi CA certificates. `runtime.txt` requests Python 3.12.10 instead of the Python 3.14 runtime shown in the deployment logs.
 
-## What is intentionally removed
-- Google OAuth sign-in
-- In-app Admin Studio
-- In-app upload, rename, move and delete actions
+Do not disable SSL certificate verification.
 
-Manage your images directly in Google Drive. The gallery reads and displays the images from Drive. Refresh the gallery after making changes in Drive.
+## Google Drive configuration
+1. Enable Google Drive API in your Google Cloud project.
+2. Create a Service Account and download a JSON key.
+3. Create a root folder in Google Drive.
+4. Share that folder with the service-account `client_email` using Viewer permission.
+5. Create album subfolders directly inside the root folder.
+6. Add `gallery_password`, `gdrive_root_folder_id`, and all fields from the service-account JSON under `[gdrive_service_account]` in Streamlit Cloud → Manage app → Settings → Secrets.
+7. Do not upload `secrets.toml` or the JSON private key to GitHub.
 
-## Google Drive setup
-1. In Google Cloud Console, create/select a project.
-2. Enable Google Drive API.
-3. Create a Service Account and generate a JSON key.
-4. Create a root folder in your Google Drive, such as `My Private Gallery`.
-5. Share that root folder with the Service Account `client_email` and grant **Viewer** access.
-6. Create album subfolders inside the root folder and put images inside those folders.
-7. Copy the root folder ID from its Drive URL.
+The code uses `https://www.googleapis.com/auth/drive.readonly`; all upload, rename and delete operations are performed manually in Google Drive.
 
-The app uses the read-only scope `https://www.googleapis.com/auth/drive.readonly`. It does not need Editor access because all changes are made directly in Drive.
+## Deploy
+Push all files to GitHub, including `runtime.txt`. Keep `.streamlit/secrets.toml` out of Git. Reboot the Streamlit app so the new runtime and dependencies are installed.
 
-## Streamlit Cloud secrets
-Open Manage app → Settings → Secrets and paste the values from `.streamlit/secrets.toml.example`. Set a long unique `gallery_password`. Paste the complete service-account JSON fields into the `[gdrive_service_account]` section.
-
-Never commit `.streamlit/secrets.toml` or the JSON private key to GitHub.
-
-## Requirements and run
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-## Security
-The password gate is a simple shared-password layer, not full identity-based authentication. Restrict access to the deployed app where possible. The service account has Viewer access only to the shared root folder. Do not make your Drive folder public.
+## Troubleshooting
+- If SSL errors persist after this transport change and Python 3.12 runtime, inspect the latest Streamlit Cloud logs. Do not turn off TLS verification.
+- A 403 error generally means the Drive folder is not shared with the service account, the API is disabled, or the account lacks access.
+- An empty gallery can mean the root folder ID is wrong or album folders are not direct children of the root folder.
