@@ -1,38 +1,47 @@
-# Modern Streamlit Google Drive Gallery
+# Private Google Drive Gallery — Password Login
 
-This version uses **Google OAuth as your own Google account**, not a service account. It includes a modern gallery and a separate Admin Studio.
+This version restores the original password-protected gallery and Google Drive Service Account connection.
 
-## Google setup
-1. Create/select a project at https://console.cloud.google.com/
+## What remains in the app
+- Modern dark gallery interface
+- Album folders and album filter
+- Filename search
+- Sort by newest, oldest, name
+- Comfortable and compact grid
+- Image preview and downloads
+- Session-only favourites
+- Pagination
+- Private password login
+- Refresh gallery button
+
+## What is intentionally removed
+- Google OAuth sign-in
+- In-app Admin Studio
+- In-app upload, rename, move and delete actions
+
+Manage your images directly in Google Drive. The gallery reads and displays the images from Drive. Refresh the gallery after making changes in Drive.
+
+## Google Drive setup
+1. In Google Cloud Console, create/select a project.
 2. Enable Google Drive API.
-3. Open Google Auth Platform / OAuth consent screen. Configure app name and support email. For personal Gmail choose External, and add your account as a test user while in Testing.
-4. Create OAuth Client ID → Web application.
-5. Add exact authorized redirect URI, e.g. `https://your-app.streamlit.app`. For local testing also add `http://localhost:8501`.
-6. Copy Client ID and Client Secret.
+3. Create a Service Account and generate a JSON key.
+4. Create a root folder in your Google Drive, such as `My Private Gallery`.
+5. Share that root folder with the Service Account `client_email` and grant **Viewer** access.
+6. Create album subfolders inside the root folder and put images inside those folders.
+7. Copy the root folder ID from its Drive URL.
 
-## Streamlit secrets
-Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` locally, or paste into Streamlit Cloud → Manage app → Settings → Secrets:
+The app uses the read-only scope `https://www.googleapis.com/auth/drive.readonly`. It does not need Editor access because all changes are made directly in Drive.
 
-```toml
-[google_oauth]
-client_id = "YOUR_CLIENT_ID"
-client_secret = "YOUR_CLIENT_SECRET"
-redirect_uri = "https://your-app.streamlit.app"
-root_folder_id = "YOUR_DRIVE_ROOT_FOLDER_ID"
-```
+## Streamlit Cloud secrets
+Open Manage app → Settings → Secrets and paste the values from `.streamlit/secrets.toml.example`. Set a long unique `gallery_password`. Paste the complete service-account JSON fields into the `[gdrive_service_account]` section.
 
-Create a root folder in your own Drive, create album subfolders inside it, and copy the root folder ID from its Drive URL. No sharing with a service account is required.
+Never commit `.streamlit/secrets.toml` or the JSON private key to GitHub.
 
-## Run
+## Requirements and run
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Deploy the GitHub repository with `app.py` as the entry point and add the same secrets in Streamlit Cloud. Never commit secrets.
-
-## Notes
-- OAuth asks for the broad `https://www.googleapis.com/auth/drive` scope because the app lists, uploads, renames and deletes Drive files.
-- This starter keeps OAuth tokens in Streamlit session state. A new browser session or server restart may require signing in again. For durable production login, store refresh tokens encrypted in a secure database.
-- Google OAuth apps left in Testing can have refresh tokens expire after seven days for non-basic scopes. For longer-term use, configure Production status and meet any Google verification requirements.
-- This is a single-owner gallery. Restrict access to the Streamlit app itself; anyone able to use the connected app session can manage the owner's selected Drive folder.
+## Security
+The password gate is a simple shared-password layer, not full identity-based authentication. Restrict access to the deployed app where possible. The service account has Viewer access only to the shared root folder. Do not make your Drive folder public.
