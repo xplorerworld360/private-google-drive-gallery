@@ -7,276 +7,253 @@ import streamlit.components.v1 as components
 from backend.auth import require_login
 from backend.drive import DriveGallery
 
-st.set_page_config(page_title="My Private Gallery", page_icon="🖼️", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Photos", page_icon="📷", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
-html,body,[class*="css"]{font-family:'DM Sans',sans-serif}
-.block-container{max-width:1800px;padding:1rem 1.25rem 2rem}
-[data-testid="stAppViewContainer"]{background:linear-gradient(145deg,#10131b 0%,#192236 55%,#111722 100%)}
-[data-testid="stHeader"]{background:transparent}
-h1,h2,h3{font-family:'Manrope',sans-serif;letter-spacing:-.03em}
-section[data-testid="stSidebar"]{background:#111722}
-div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="stTextInput"] input{border-radius:10px}
-.hero{padding:1.05rem 1.35rem;border:1px solid #ffffff18;border-radius:17px;background:linear-gradient(110deg,#626cff27,#23c6a017);margin-bottom:.8rem}
-.kicker{font-size:.68rem;letter-spacing:.15em;text-transform:uppercase;color:#b8c5df;font-weight:700}
-.hero-title{font:800 clamp(1.45rem,2.4vw,2rem) Manrope;margin:.22rem 0}
-.hero-sub{font-size:.86rem;color:#bdc8dc}
-div[data-testid="stHorizontalBlock"]{gap:.65rem}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800&display=swap');
+:root{color-scheme:light}
+html,body,[class*="css"]{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+[data-testid="stAppViewContainer"]{background:#f5f5f7;color:#1d1d1f}
+[data-testid="stHeader"]{background:rgba(245,245,247,.88);backdrop-filter:blur(18px)}
+.block-container{max-width:1700px;padding:1.25rem 2rem 3rem}
+section[data-testid="stSidebar"]{background:#fbfbfd;border-right:1px solid #e7e7eb}
+section[data-testid="stSidebar"] *{color:#27272a}
+h1,h2,h3{color:#1d1d1f;font-family:Inter,sans-serif;letter-spacing:-.04em}
+h1{font-weight:750}
+h2{font-weight:700}
+div[data-testid="stTextInput"] input,div[data-testid="stSelectbox"] div[role="combobox"]{border-radius:12px;background:#fff;border-color:#e2e2e7}
+div.stButton>button{border-radius:11px;border:1px solid #e2e2e7;background:#fff;color:#222}
+div.stButton>button:hover{border-color:#aaa;background:#f7f7f9;color:#111}
+div[data-testid="stAlert"]{border-radius:14px}
+.topline{color:#86868b;font-size:.78rem;font-weight:650;letter-spacing:.08em;text-transform:uppercase}
+.subtitle{color:#6e6e73;font-size:.94rem}
+.section-title{font-size:1.1rem;font-weight:700;letter-spacing:-.025em;color:#1d1d1f}
+div[data-testid="stHorizontalBlock"]{gap:.75rem}
 </style>
 """, unsafe_allow_html=True)
 
 require_login()
 
 @st.cache_resource
-def drive_client():
+def get_drive():
     return DriveGallery()
 
 try:
-    drive = drive_client()
+    drive = get_drive()
     root_id = drive.root_id
 except Exception as exc:
-    st.error("Unable to connect to Google Drive.")
+    st.error("Google Drive connection failed.")
     st.code(str(exc))
-    st.info("Check the service-account fields in Streamlit Secrets, confirm the root folder is shared with its client_email, and confirm Google Drive API is enabled.")
-    if st.button("Retry connection"):
+    st.info("Check the service-account details in Streamlit Secrets, share the root folder with the service-account email as Viewer, and ensure Google Drive API is enabled.")
+    if st.button("Try again"):
         st.rerun()
     st.stop()
 
-st.markdown("""
-<div class="hero">
-  <div class="kicker">Your private collection</div>
-  <div class="hero-title">All your images. One clean view.</div>
-  <div class="hero-sub">Browse folders and subfolders, search filenames, and open any image in a swipeable full-screen viewer.</div>
-</div>
-""", unsafe_allow_html=True)
+# Keep navigation in session state. Root means all photos recursively, not only direct children.
+if "current_folder_id" not in st.session_state:
+    st.session_state.current_folder_id = root_id
+if "current_folder_name" not in st.session_state:
+    st.session_state.current_folder_name = "All Photos"
+if "folder_breadcrumb" not in st.session_state:
+    st.session_state.folder_breadcrumb = []
 
-# Build a folder path using cascading selectors. Each level drills into the selected folder.
-if "folder_path" not in st.session_state:
-    st.session_state.folder_path = []
+current_id = st.session_state.current_folder_id
+current_name = st.session_state.current_folder_name
+is_root = current_id == root_id
 
-def change_folder(level, key):
-    chosen = st.session_state.get(key)
-    path = st.session_state.folder_path[:level]
-    if chosen:
-        path.append(chosen)
-    st.session_state.folder_path = path
+with st.sidebar:
+    st.markdown("## Photos")
+    st.caption("Your private Google Drive library")
+    st.divider()
+    if st.button("▦  All Photos", use_container_width=True, type="primary" if is_root else "secondary"):
+        st.session_state.current_folder_id = root_id
+        st.session_state.current_folder_name = "All Photos"
+        st.session_state.folder_breadcrumb = []
+        st.rerun()
+    st.markdown("**Albums & folders**")
+    try:
+        root_folders = drive.list_folders(root_id)
+        for folder in root_folders:
+            selected = current_id == folder["id"]
+            if st.button(("▣  " if selected else "▢  ") + folder["name"], key=f"side_{folder['id']}", use_container_width=True):
+                st.session_state.current_folder_id = folder["id"]
+                st.session_state.current_folder_name = folder["name"]
+                st.session_state.folder_breadcrumb = [{"id":folder["id"],"name":folder["name"]}]
+                st.rerun()
+    except Exception as exc:
+        st.caption(f"Could not list folders: {exc}")
+    st.divider()
+    if st.button("↻  Refresh library", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.link_button("Open Google Drive ↗", "https://drive.google.com/drive/my-drive", use_container_width=True)
+    st.divider()
+    st.caption("Manage folders and files directly in Google Drive. This app only reads your collection.")
 
-path = st.session_state.folder_path
-parent_id = root_id
-levels = []
-try:
-    root_folders = drive.list_folders(parent_id)
-    folder_sets = [root_folders]
-    current_folders = root_folders
-    for depth in range(4):
-        if not current_folders:
-            break
-        key = f"folder_level_{depth}"
-        valid_ids = [f["id"] for f in current_folders]
-        old_id = path[depth] if depth < len(path) else None
-        if old_id not in valid_ids:
-            old_id = None
-        options = [None] + valid_ids
-        names = {f["id"]: f["name"] for f in current_folders}
-        selected_index = options.index(old_id)
-        label = ["Folder", "Subfolder", "Subfolder 2", "Subfolder 3"][depth]
-        selected_id = st.selectbox(
-            label,
-            options,
-            index=selected_index,
-            format_func=lambda x, names=names: "All items in root" if x is None and depth == 0 else ("Choose a folder…" if x is None else names.get(x, "Folder")),
-            key=key,
-            on_change=change_folder,
-            args=(depth, key),
-        )
-        if selected_id is None:
-            path = path[:depth]
-            break
-        if depth >= len(path) or path[depth] != selected_id:
-            path = path[:depth] + [selected_id]
-            st.session_state.folder_path = path
-        parent_id = selected_id
-        current_folders = drive.list_folders(parent_id)
-    # If user navigated to a selected folder, load its children as subfolders.
-    active_folder_id = path[-1] if path else root_id
-    child_folders = drive.list_folders(active_folder_id)
-except Exception as exc:
-    st.error(f"Could not load Drive folders: {exc}")
-    st.stop()
+# Header and compact controls
+st.markdown('<div class="topline">YOUR LIBRARY</div>', unsafe_allow_html=True)
+if is_root:
+    st.title("All Photos")
+    st.markdown('<div class="subtitle">Every photo in your gallery, gathered from all nested folders.</div>', unsafe_allow_html=True)
+else:
+    st.title(current_name)
+    crumbs = ["All Photos"] + [x["name"] for x in st.session_state.folder_breadcrumb]
+    st.markdown('<div class="subtitle">' + "  /  ".join(crumbs) + '</div>', unsafe_allow_html=True)
 
-# Breadcrumb shows current location.
-crumb_names = ["My Private Gallery"]
-for fid in path:
-    found = drive.get_folder(fid)
-    if found:
-        crumb_names.append(found["name"])
-st.caption(" / ".join(crumb_names))
+if not is_root:
+    if st.button("← All Photos"):
+        st.session_state.current_folder_id = root_id
+        st.session_state.current_folder_name = "All Photos"
+        st.session_state.folder_breadcrumb = []
+        st.rerun()
 
-# Toolbar: search + sort + density + type.
-t1, t2, t3, t4 = st.columns([2.2, 1.05, 1.0, 1.0])
-with t1:
-    query = st.text_input("Search files", placeholder="⌕  Search this folder by filename…", label_visibility="collapsed")
-with t2:
-    sort = st.selectbox("Sort", ["Newest", "Oldest", "Name A–Z", "Name Z–A"], label_visibility="collapsed")
-with t3:
-    density = st.selectbox("Grid size", ["Large", "Medium", "Small"], index=1, label_visibility="collapsed")
-with t4:
-    kind = st.selectbox("Show", ["All items", "Images only", "Folders only"], label_visibility="collapsed")
+# Search and sort controls
+c1, c2, c3 = st.columns([2.6, 1.15, 1.0])
+with c1:
+    search = st.text_input("Search", placeholder="Search photos by filename…", label_visibility="collapsed")
+with c2:
+    sort = st.selectbox("Sort", ["Newest first", "Oldest first", "Name A–Z", "Name Z–A"], label_visibility="collapsed")
+with c3:
+    density = st.selectbox("View", ["Comfortable", "Dense"], label_visibility="collapsed")
 
 try:
-    images = drive.list_images(active_folder_id, query=query.strip())
-    if sort == "Newest":
-        images.sort(key=lambda x: x.get("modifiedTime", ""), reverse=True)
-    elif sort == "Oldest":
-        images.sort(key=lambda x: x.get("modifiedTime", ""))
+    # Root view recursively includes nested-folder photos; a folder view includes its own descendants.
+    images = drive.list_images_recursive(current_id, query=search.strip())
+    child_folders = drive.list_folders(current_id)
+    if sort == "Newest first":
+        images.sort(key=lambda x:x.get("modifiedTime",""), reverse=True)
+    elif sort == "Oldest first":
+        images.sort(key=lambda x:x.get("modifiedTime",""))
     elif sort == "Name A–Z":
-        images.sort(key=lambda x: x.get("name", "").casefold())
+        images.sort(key=lambda x:x.get("name","").casefold())
     else:
-        images.sort(key=lambda x: x.get("name", "").casefold(), reverse=True)
-    if kind == "Folders only":
-        images = []
-    if kind == "Images only":
-        child_folders = []
+        images.sort(key=lambda x:x.get("name","").casefold(), reverse=True)
 except Exception as exc:
-    st.error(f"Could not load images: {exc}")
+    st.error(f"Could not read this Drive folder: {exc}")
     st.stop()
 
-# Folder cards first, with clear navigation. Folder selection is handled by a simple button.
-if kind != "Images only" and child_folders:
-    st.markdown("**Folders**")
-    folder_cols = st.columns(5)
+# Album/folder tiles are clearly separated from photos.
+if child_folders:
+    st.markdown('<div class="section-title">Albums</div>', unsafe_allow_html=True)
+    folder_cols = st.columns(5 if density == "Dense" else 4)
     for i, folder in enumerate(child_folders):
-        with folder_cols[i % 5]:
+        with folder_cols[i % len(folder_cols)]:
             with st.container(border=True):
                 st.markdown(f"📁 **{folder['name']}**")
-                st.caption("Open folder")
-                if st.button("Open →", key=f"open_folder_{folder['id']}", use_container_width=True):
-                    st.session_state.folder_path = path + [folder["id"]]
+                st.caption("Folder")
+                if st.button("Open album", key=f"album_{folder['id']}", use_container_width=True):
+                    st.session_state.current_folder_id = folder["id"]
+                    st.session_state.current_folder_name = folder["name"]
+                    st.session_state.folder_breadcrumb = st.session_state.folder_breadcrumb + [{"id":folder["id"],"name":folder["name"]}]
                     st.rerun()
 
-# Load a moderate number of images to keep rendering and memory usage responsive.
-page_size = 48
-total = len(images)
-pages = max(1, math.ceil(total / page_size))
-if "image_page" not in st.session_state:
-    st.session_state.image_page = 1
-filter_sig = (active_folder_id, query, sort, kind)
-if st.session_state.get("image_filter_sig") != filter_sig:
-    st.session_state.image_filter_sig = filter_sig
-    st.session_state.image_page = 1
-st.session_state.image_page = min(st.session_state.image_page, pages)
-start = (st.session_state.image_page - 1) * page_size
-selected_images = images[start:start + page_size]
+st.markdown('<div class="section-title">Photos</div>', unsafe_allow_html=True)
+st.caption(f"{len(images)} photos" + (f" · Searching within {current_name}" if search else ""))
 
-st.markdown(f"**Images** · {total} found", unsafe_allow_html=True)
-if not selected_images:
-    st.info("No images in this folder. Open a subfolder or add images directly in Google Drive.")
+# Paginate before downloading bytes. 48 per page is a practical balance for Streamlit Cloud.
+page_size = 48
+page_count = max(1, math.ceil(len(images) / page_size))
+if "photo_page" not in st.session_state:
+    st.session_state.photo_page = 1
+filter_key = (current_id, search, sort)
+if st.session_state.get("photo_filter_key") != filter_key:
+    st.session_state.photo_filter_key = filter_key
+    st.session_state.photo_page = 1
+st.session_state.photo_page = min(st.session_state.photo_page, page_count)
+offset = (st.session_state.photo_page - 1) * page_size
+visible = images[offset:offset + page_size]
+
+if not visible:
+    st.info("No photos found here. Add photos or folders directly in Google Drive.")
 else:
-    gallery = []
-    progress = st.empty()
-    for i, item in enumerate(selected_images):
+    payload_items = []
+    status = st.empty()
+    for i, file in enumerate(visible):
         try:
-            raw = drive.download_bytes(item["id"])
-            mime = item.get("mimeType") or "image/jpeg"
-            gallery.append({
-                "id": item["id"],
-                "name": item.get("name", "Image"),
-                "date": item.get("modifiedTime", "")[:10],
-                "size": int(item.get("size", 0) or len(raw)),
-                "mime": mime,
-                "src": "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii"),
+            raw = drive.download_bytes(file["id"])
+            mime = file.get("mimeType") or "image/jpeg"
+            payload_items.append({
+                "id":file["id"],
+                "name":file.get("name","Photo"),
+                "date":file.get("modifiedTime","")[:10],
+                "size":int(file.get("size",0) or len(raw)),
+                "mime":mime,
+                "src":"data:"+mime+";base64,"+base64.b64encode(raw).decode("ascii"),
             })
         except Exception as exc:
-            st.warning(f"Could not load {item.get('name','image')}: {exc}")
-        progress.caption(f"Loading image previews {i+1}/{len(selected_images)}…")
-    progress.empty()
+            st.warning(f"Preview unavailable for {file.get('name','photo')}: {exc}")
+        status.caption(f"Loading previews {i+1} of {len(visible)}…")
+    status.empty()
 
-    if gallery:
-        payload = json.dumps(gallery, ensure_ascii=True).replace("</", "<\\/")
-        columns = {"Large": 4, "Medium": 6, "Small": 8}[density]
-        # The embedded grid fills the available page width; viewer opens only on image click.
+    if payload_items:
+        data = json.dumps(payload_items, ensure_ascii=True).replace("</","<\\/")
+        cols = 6 if density == "Dense" else 5
         html = r"""
-<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-*{box-sizing:border-box}body{margin:0;background:transparent;color:#f2f5ff;font-family:Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:transparent;color:#1d1d1f;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .grid{display:grid;grid-template-columns:repeat(__COLS__,minmax(0,1fr));gap:12px}
-.card{min-width:0;border:1px solid #ffffff15;background:#ffffff08;border-radius:12px;overflow:hidden;transition:transform .16s,border-color .16s;cursor:pointer}
-.card:hover{transform:translateY(-3px);border-color:#9aa9ff88}
-.thumb{width:100%;aspect-ratio:1/1;background:#0b101a;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.info{padding:8px 9px 9px}.name{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:10px;color:#aab6cc;margin-top:4px}
-.viewer{display:none;position:fixed;inset:0;z-index:1000;background:rgba(3,6,12,.97);align-items:center;justify-content:center;flex-direction:column;padding:18px}
-.viewer.open{display:flex}.viewer img{max-width:94vw;max-height:78vh;object-fit:contain}
-.vtop{position:absolute;top:12px;left:18px;right:18px;display:flex;justify-content:space-between;color:#dbe4f7;font-size:13px}
-.close{position:absolute;right:18px;top:40px;border:0;background:#ffffff18;color:white;font-size:26px;border-radius:50%;width:42px;height:42px;cursor:pointer}
-.nav{position:absolute;top:50%;transform:translateY(-50%);width:42px;height:42px;border:1px solid #ffffff55;border-radius:50%;background:#182235d9;color:white;font-size:25px;cursor:pointer}.prev{left:16px}.next{right:16px}
-.vbottom{position:absolute;bottom:14px;left:12px;right:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:#dce5f7;font-size:12px;flex-wrap:wrap}
-.dl{color:white;text-decoration:none;border:1px solid #ffffff44;padding:8px 12px;border-radius:9px;background:#ffffff13}
-@media(max-width:1200px){.grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
-@media(max-width:850px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}}
-@media(max-width:550px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.info{padding:6px}.name{font-size:10px}}
+.photo{position:relative;overflow:hidden;border-radius:13px;background:#e8e8ed;aspect-ratio:1/1;cursor:zoom-in;transition:transform .18s,box-shadow .18s}
+.photo:hover{transform:scale(1.018);box-shadow:0 8px 22px #0002}
+.photo img{width:100%;height:100%;object-fit:cover;display:block}
+.photo .caption{position:absolute;left:0;right:0;bottom:0;padding:25px 9px 8px;color:white;font-size:11px;font-weight:600;background:linear-gradient(transparent,#0008);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .15s}
+.photo:hover .caption{opacity:1}
+.viewer{display:none;position:fixed;inset:0;z-index:9999;background:rgba(250,250,252,.98);align-items:center;justify-content:center;flex-direction:column;padding:24px}
+.viewer.open{display:flex}
+.viewer img{max-width:92vw;max-height:80vh;object-fit:contain;box-shadow:0 8px 35px #0001}
+.vtop{position:absolute;top:14px;left:22px;right:22px;display:flex;justify-content:space-between;color:#666;font-size:13px}
+.close{position:absolute;right:18px;top:44px;border:0;background:#e9e9ee;color:#333;font-size:24px;border-radius:50%;width:40px;height:40px;cursor:pointer}
+.nav{position:absolute;top:50%;transform:translateY(-50%);width:42px;height:42px;border:0;border-radius:50%;background:#e9e9ee;color:#333;font-size:24px;cursor:pointer}.prev{left:18px}.next{right:18px}
+.vbottom{position:absolute;bottom:16px;display:flex;align-items:center;gap:14px;color:#333;font-size:13px;flex-wrap:wrap;justify-content:center}
+.dl{color:#06c;text-decoration:none;font-weight:600}
+@media(max-width:1200px){.grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}}
+@media(max-width:850px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}}
+@media(max-width:560px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.photo{border-radius:8px}}
 </style></head><body>
 <div class="grid" id="grid"></div>
 <div class="viewer" id="viewer">
- <div class="vtop"><span id="count"></span><span>Swipe · ← → · Esc to close</span></div>
- <button class="close" id="close">×</button>
- <button class="nav prev" id="prev">‹</button>
- <img id="full" alt="Full image">
- <button class="nav next" id="next">›</button>
- <div class="vbottom"><span id="title"></span><a class="dl" id="download" download>↓ Download original</a></div>
+ <div class="vtop"><span id="counter"></span><span>← → to navigate · Esc to close</span></div>
+ <button class="close" id="close" aria-label="Close">×</button>
+ <button class="nav prev" id="prev" aria-label="Previous">‹</button>
+ <img id="full" alt="Photo preview">
+ <button class="nav next" id="next" aria-label="Next">›</button>
+ <div class="vbottom"><span id="title"></span><a class="dl" id="download" download>Download original ↓</a></div>
 </div>
 <script>
 const items=__DATA__;let index=0;
 const grid=document.getElementById('grid'),viewer=document.getElementById('viewer'),full=document.getElementById('full');
 items.forEach((it,i)=>{
- const card=document.createElement('div');card.className='card';
- const thumb=document.createElement('div');thumb.className='thumb';
- const im=document.createElement('img');im.loading='lazy';im.src=it.src;im.alt=it.name;thumb.appendChild(im);
- const info=document.createElement('div');info.className='info';
- const name=document.createElement('div');name.className='name';name.textContent=it.name;
- const meta=document.createElement('div');meta.className='meta';meta.textContent=(it.date||'')+(it.size?' · '+Math.round(it.size/1024)+' KB':'');
- info.append(name,meta);card.append(thumb,info);card.onclick=()=>open(i);grid.appendChild(card);
+ const card=document.createElement('div');card.className='photo';
+ const im=document.createElement('img');im.loading='lazy';im.src=it.src;im.alt=it.name;
+ const cap=document.createElement('div');cap.className='caption';cap.textContent=it.name;
+ card.append(im,cap);card.addEventListener('click',()=>open(i));grid.appendChild(card);
 });
-function render(){const it=items[index];full.src=it.src;document.getElementById('count').textContent=(index+1)+' / '+items.length;document.getElementById('title').textContent=it.name;const dl=document.getElementById('download');dl.href=it.src;dl.download=it.name}
+function render(){const it=items[index];full.src=it.src;document.getElementById('counter').textContent=(index+1)+' of '+items.length;document.getElementById('title').textContent=it.name;const dl=document.getElementById('download');dl.href=it.src;dl.download=it.name}
 function open(i){index=i;viewer.classList.add('open');render()}
 function close(){viewer.classList.remove('open')}
-function move(d){index=(index+d+items.length)%items.length;render()}
+function move(n){index=(index+n+items.length)%items.length;render()}
 document.getElementById('close').onclick=close;document.getElementById('prev').onclick=()=>move(-1);document.getElementById('next').onclick=()=>move(1);
 viewer.addEventListener('click',e=>{if(e.target===viewer)close()});
 document.addEventListener('keydown',e=>{if(!viewer.classList.contains('open'))return;if(e.key==='Escape')close();if(e.key==='ArrowLeft')move(-1);if(e.key==='ArrowRight')move(1)});
 let sx=0,sy=0;viewer.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});
-viewer.addEventListener('touchend',e=>{let dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy))move(dx<0?1:-1)},{passive:true});
-// Tell Streamlit the actual responsive grid height, avoiding a fixed-height blank area or clipped rows.
-function reportHeight(){const h=Math.max(document.body.scrollHeight,document.documentElement.scrollHeight);window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:h},'*')}
-window.addEventListener('load',reportHeight);window.addEventListener('resize',reportHeight);
-if(window.ResizeObserver){new ResizeObserver(reportHeight).observe(document.body)}
-setTimeout(reportHeight,100);setTimeout(reportHeight,500);
+viewer.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy))move(dx<0?1:-1)},{passive:true});
+function setHeight(){const h=document.documentElement.scrollHeight;window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:h},'*')}
+window.addEventListener('load',setHeight);window.addEventListener('resize',setHeight);if(window.ResizeObserver)new ResizeObserver(setHeight).observe(document.body);setTimeout(setHeight,200);
 </script></body></html>
-""".replace("__COLS__", str(columns)).replace("__DATA__", payload)
-        rows = math.ceil(len(gallery) / columns)
-        height = max(240, rows * 205 + 20)
-        components.html(html, height=height, scrolling=False)
+""".replace("__COLS__", str(cols)).replace("__DATA__", data)
+        # Dynamic frame height prevents a giant empty area; images are square tiles.
+        rows = math.ceil(len(payload_items) / cols)
+        components.html(html, height=max(250, rows * 190 + 35), scrolling=False)
 
-if pages > 1:
-    a, b, c = st.columns([1, 2, 1])
-    with a:
-        if st.button("← Previous", disabled=st.session_state.image_page <= 1, use_container_width=True):
-            st.session_state.image_page -= 1
-            st.rerun()
-    with b:
-        st.markdown(f"<div style='text-align:center;padding:.5rem;color:#aebbd2'>Page {st.session_state.image_page} of {pages}</div>", unsafe_allow_html=True)
-    with c:
-        if st.button("Next →", disabled=st.session_state.image_page >= pages, use_container_width=True):
-            st.session_state.image_page += 1
-            st.rerun()
-
-with st.sidebar:
-    st.markdown("### 🖼️ My Gallery")
-    st.caption("Password-protected · Google Drive")
-    st.divider()
-    st.link_button("Open Google Drive", "https://drive.google.com/drive/my-drive", use_container_width=True)
-    if st.button("Refresh gallery", use_container_width=True):
-        st.rerun()
-    st.caption("Create folders and manage files directly in Google Drive.")
+if page_count > 1:
+    p1,p2,p3=st.columns([1,2,1])
+    with p1:
+        if st.button("Previous",disabled=st.session_state.photo_page<=1,use_container_width=True):
+            st.session_state.photo_page-=1;st.rerun()
+    with p2:
+        st.markdown(f"<div style='text-align:center;padding:.5rem;color:#777'>Page {st.session_state.photo_page} of {page_count}</div>",unsafe_allow_html=True)
+    with p3:
+        if st.button("Next",disabled=st.session_state.photo_page>=page_count,use_container_width=True):
+            st.session_state.photo_page+=1;st.rerun()
