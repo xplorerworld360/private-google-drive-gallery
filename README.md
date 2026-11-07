@@ -1,72 +1,38 @@
-# Private Google Drive Streamlit Gallery
+# Modern Streamlit Google Drive Gallery
 
-A private Streamlit image gallery. Google Drive stores the original images; Streamlit lists albums (Drive folders), previews images, searches filenames, uploads, downloads, creates albums, and deletes images.
+This version uses **Google OAuth as your own Google account**, not a service account. It includes a modern gallery and a separate Admin Studio.
 
-## 1. Google Drive setup
+## Google setup
+1. Create/select a project at https://console.cloud.google.com/
+2. Enable Google Drive API.
+3. Open Google Auth Platform / OAuth consent screen. Configure app name and support email. For personal Gmail choose External, and add your account as a test user while in Testing.
+4. Create OAuth Client ID → Web application.
+5. Add exact authorized redirect URI, e.g. `https://your-app.streamlit.app`. For local testing also add `http://localhost:8501`.
+6. Copy Client ID and Client Secret.
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a project (or select an existing project).
-3. Enable **Google Drive API** for that project.
-4. Create a service account under **IAM & Admin → Service Accounts**.
-5. Create a JSON key for the service account and download it securely.
-6. Create a root folder in Google Drive, for example `Private Gallery`.
-7. Share that root folder with the service account's `client_email` address from the JSON key. Give it **Editor** access so uploads and deletes work.
-8. Create album subfolders inside the root folder. Each immediate child folder appears as an album in the app.
-9. Copy the root folder ID from its Drive URL:
-   `https://drive.google.com/drive/folders/FOLDER_ID`
+## Streamlit secrets
+Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` locally, or paste into Streamlit Cloud → Manage app → Settings → Secrets:
 
-The app accesses the root folder and its child albums as the service account. The folder must be shared with that service account. Do not make the folder public.
-
-## 2. Install locally
-
-Python 3.10 or newer is recommended.
-
-```bash
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install -r requirements.txt
+```toml
+[google_oauth]
+client_id = "YOUR_CLIENT_ID"
+client_secret = "YOUR_CLIENT_SECRET"
+redirect_uri = "https://your-app.streamlit.app"
+root_folder_id = "YOUR_DRIVE_ROOT_FOLDER_ID"
 ```
 
-Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml`.
+Create a root folder in your own Drive, create album subfolders inside it, and copy the root folder ID from its Drive URL. No sharing with a service account is required.
 
-Paste the service account JSON fields into `[gdrive_service_account]`, set `gdrive_root_folder_id`, and choose a long unique `gallery_password`.
-
-Run:
-
+## Run
 ```bash
+pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit.
+Deploy the GitHub repository with `app.py` as the entry point and add the same secrets in Streamlit Cloud. Never commit secrets.
 
-## 3. Deploy privately
-
-You can deploy to Streamlit Community Cloud or another host that supports Streamlit. Add the contents of `secrets.toml` in the host's **App settings → Secrets** area. Never commit `secrets.toml`, service-account JSON keys, or passwords to Git.
-
-For a genuinely private deployment, also restrict access at the hosting/network layer (for example, an authenticated company environment, VPN, or identity-aware proxy). The in-app password is an additional gate, not a substitute for host-level access control or per-user identity management.
-
-## 4. Security and behavior
-
-- The service account has access only to folders explicitly shared with it, subject to Google Drive permissions.
-- The app uses a single shared gallery password. Anyone who knows it can use the admin actions.
-- Upload, download, and delete operate on the actual Google Drive files.
-- Deleting an image through Admin deletes it from Drive; this is not just a local removal.
-- Albums are immediate subfolders of the configured root folder. Images are listed from the selected album folder; nested subfolders are not recursively scanned.
-- The app currently supports common image types and searches by filename.
-- For a multi-user production app, replace the shared password with Google OAuth sign-in and per-user authorization, and consider audit logging and upload size limits.
-
-## 5. Troubleshooting
-
-**403 / permission denied:** Confirm Google Drive API is enabled and the root folder is shared with the service account email as Editor.
-
-**Invalid private key:** Preserve the `\\n` line breaks in `private_key` in `secrets.toml`. Copy the value exactly from the downloaded service-account JSON.
-
-**No albums:** Create one or more subfolders directly inside the configured root folder.
-
-**Wrong folder:** Verify the ID in the Drive folder URL, not an image/file URL.
-
-**Large images:** Streamlit must download image bytes to render them. Consider thumbnails or a CDN/object store for very large galleries.
+## Notes
+- OAuth asks for the broad `https://www.googleapis.com/auth/drive` scope because the app lists, uploads, renames and deletes Drive files.
+- This starter keeps OAuth tokens in Streamlit session state. A new browser session or server restart may require signing in again. For durable production login, store refresh tokens encrypted in a secure database.
+- Google OAuth apps left in Testing can have refresh tokens expire after seven days for non-basic scopes. For longer-term use, configure Production status and meet any Google verification requirements.
+- This is a single-owner gallery. Restrict access to the Streamlit app itself; anyone able to use the connected app session can manage the owner's selected Drive folder.

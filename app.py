@@ -1,119 +1,66 @@
 import streamlit as st
-from backend.auth import require_login
-from backend.google_drive import DriveGallery, DriveError
+from backend.auth import get_credentials, login, sidebar
+from backend.drive import Drive
 
-st.set_page_config(page_title="Private Drive Gallery", page_icon="🖼️", layout="wide")
+st.set_page_config(page_title="My Gallery", page_icon="🖼️", layout="wide")
 st.markdown("""
 <style>
-.block-container {padding-top: 1.8rem; max-width: 1500px;}
-[data-testid="stImage"] img {border-radius: 10px;}
-.gallery-caption {font-size: .88rem; opacity: .8; overflow-wrap: anywhere;}
-</style>
-""", unsafe_allow_html=True)
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+html,body,[class*="css"]{font-family:'DM Sans',sans-serif}
+.block-container{max-width:1550px;padding-top:1.4rem}
+[data-testid="stAppViewContainer"]{background:linear-gradient(145deg,#10131b,#171d2a 55%,#11151e)}
+[data-testid="stHeader"]{background:transparent}
+h1,h2,h3{font-family:'Manrope',sans-serif;letter-spacing:-.035em}
+.hero{padding:1.5rem;border:1px solid #ffffff18;border-radius:22px;background:linear-gradient(120deg,#626cff30,#24c4a018);margin-bottom:1.2rem}
+.eyebrow{font-size:.75rem;letter-spacing:.15em;text-transform:uppercase;color:#aeb9d2;font-weight:700}
+.hero-title{font:800 2.15rem Manrope;margin:.35rem 0}
+.hero-sub,.muted{color:#aeb9cc}
+.metric{padding:1rem;border:1px solid #ffffff18;border-radius:16px;background:#ffffff08}
+.metric small{color:#aeb9cc}.metric strong{font:800 1.55rem Manrope;display:block}
+div[data-testid="stImage"] img{border-radius:14px;object-fit:cover}
+section[data-testid="stSidebar"]{background:#111722}
+</style>""", unsafe_allow_html=True)
 
-require_login()
-st.title("🖼️ My Private Gallery")
-st.caption("Your albums and images are loaded directly from your Google Drive.")
-
-@st.cache_resource
-def get_gallery():
-    return DriveGallery()
-
-try:
-    drive = get_gallery()
-    albums = drive.list_albums()
-except Exception as exc:
-    st.error(f"Could not connect to Google Drive: {exc}")
-    st.info("Check the setup instructions and your Streamlit secrets.")
+creds = get_credentials()
+if not creds:
+    login()
     st.stop()
-
-if not albums:
-    st.warning("No album folders found in the configured Google Drive folder.")
-    st.stop()
-
-tab_gallery, tab_admin = st.tabs(["Gallery", "Admin"])
-
-with tab_gallery:
-    names = ["All albums"] + [a["name"] for a in albums]
-    selected_album = st.selectbox("Album", names)
-    query = st.text_input("Search images", placeholder="Search by filename…")
-    album_map = {a["name"]: a for a in albums}
-    selected = None if selected_album == "All albums" else album_map[selected_album]
-
-    with st.spinner("Loading images…"):
-        images = drive.list_images(selected["id"] if selected else None, query=query.strip())
-
-    st.caption(f"{len(images)} image(s)")
-    if not images:
-        st.info("No images match your selection.")
-    else:
-        cols = st.columns(4)
-        for i, item in enumerate(images):
-            with cols[i % 4]:
-                try:
-                    data = drive.download_bytes(item["id"])
-                    st.image(data, use_container_width=True)
-                    st.markdown(f'<div class="gallery-caption">{item["name"]}</div>', unsafe_allow_html=True)
-                    st.download_button(
-                        "⬇️ Download",
-                        data=data,
-                        file_name=item["name"],
-                        mime=item.get("mimeType", "application/octet-stream"),
-                        key=f"download_{item['id']}",
-                        use_container_width=True,
-                    )
-                except Exception as exc:
-                    st.warning(f"Unable to load {item['name']}: {exc}")
-
-with tab_admin:
-    st.subheader("Gallery administration")
-    st.markdown("Upload images into an album or create a new album folder.")
-    album_names = [a["name"] for a in albums]
-    upload_album_name = st.selectbox("Upload destination", album_names, key="upload_album")
-    uploaded = st.file_uploader(
-        "Choose image files",
-        type=["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"],
-        accept_multiple_files=True,
-    )
-    if st.button("Upload selected images", type="primary", disabled=not uploaded):
-        target = next(a for a in albums if a["name"] == upload_album_name)
-        progress = st.progress(0)
-        status = st.empty()
-        for index, file in enumerate(uploaded):
+sidebar()
+drive = Drive(creds)
+albums = drive.albums()
+images_all = drive.images()
+st.markdown('<div class="hero"><div class="eyebrow">Your personal cloud collection</div><div class="hero-title">Your gallery, beautifully organised.</div><div class="hero-sub">Browse albums, discover favourites and manage your collection directly in your own Google Drive.</div></div>', unsafe_allow_html=True)
+a,b,c,d = st.columns(4)
+for col,label,value in [(a,"ALBUMS",len(albums)),(b,"IMAGES",len(images_all)),(c,"STORAGE",f"{sum(int(x.get('size',0) or 0) for x in images_all)/1048576:.1f} MB"),(d,"ACCOUNT",st.session_state.get("email","Google"))]:
+    col.markdown(f'<div class="metric"><small>{label}</small><strong>{value}</strong></div>',unsafe_allow_html=True)
+st.write("")
+x,y=st.columns([3,1])
+x.subheader("Explore your collection")
+y.page_link("pages/1_Admin.py",label="Open Admin Studio →",icon="⚙️")
+f1,f2,f3=st.columns([2,2,1])
+album_names=["All albums"]+[z["name"] for z in albums]
+selected=f1.selectbox("Album",album_names,label_visibility="collapsed")
+query=f2.text_input("Search",placeholder="⌕  Search filenames…",label_visibility="collapsed")
+sort=f3.selectbox("Sort",["Newest","Oldest","Name A–Z","Name Z–A"],label_visibility="collapsed")
+album_id=None if selected=="All albums" else next(z["id"] for z in albums if z["name"]==selected)
+items=drive.images(album_id,query.strip())
+if sort=="Newest": items.sort(key=lambda z:z.get("modifiedTime",""),reverse=True)
+elif sort=="Oldest": items.sort(key=lambda z:z.get("modifiedTime",""))
+elif sort=="Name A–Z": items.sort(key=lambda z:z["name"].lower())
+else: items.sort(key=lambda z:z["name"].lower(),reverse=True)
+st.caption(f"Showing {len(items)} image(s) · {selected}")
+density=st.segmented_control("Layout",["Comfortable","Compact"],default="Comfortable",label_visibility="collapsed") or "Comfortable"
+n=5 if density=="Compact" else 4
+for start in range(0,len(items),n):
+    for col,item in zip(st.columns(n,gap="medium"),items[start:start+n]):
+        with col:
             try:
-                drive.upload_file(target["id"], file.name, file.getvalue(), file.type or "application/octet-stream")
-                status.success(f"Uploaded {file.name}")
-            except Exception as exc:
-                status.error(f"Failed to upload {file.name}: {exc}")
-            progress.progress((index + 1) / len(uploaded))
-        st.cache_data.clear()
-        st.rerun()
-
-    st.divider()
-    st.subheader("Create an album")
-    new_album = st.text_input("New album name")
-    if st.button("Create album", disabled=not new_album.strip()):
-        try:
-            drive.create_album(new_album.strip())
-            st.success(f"Created album: {new_album}")
-            st.rerun()
-        except Exception as exc:
-            st.error(str(exc))
-
-    st.divider()
-    st.subheader("Delete an image")
-    delete_album = st.selectbox("Album to manage", album_names, key="delete_album")
-    target = next(a for a in albums if a["name"] == delete_album)
-    delete_images = drive.list_images(target["id"])
-    if delete_images:
-        choice = st.selectbox("Image", delete_images, format_func=lambda x: x["name"])
-        confirm = st.checkbox("I understand this permanently deletes the file from Google Drive.")
-        if st.button("Delete selected image", type="secondary", disabled=not confirm):
-            try:
-                drive.delete_file(choice["id"])
-                st.success("Image deleted from Google Drive.")
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-    else:
-        st.caption("This album has no images.")
+                data=drive.download(item["id"])
+                st.image(data,use_container_width=True)
+                st.markdown(f"**{item['name']}**")
+                st.caption(f"{item.get('modifiedTime','')[:10]} · {int(item.get('size',0) or 0)/1024:.0f} KB")
+                st.download_button("↓ Download",data,file_name=item["name"],mime=item.get("mimeType","image/jpeg"),key="dl"+item["id"],use_container_width=True)
+            except Exception as e: st.warning(f"Preview unavailable: {e}")
+if not items: st.info("No images found. Upload images from Admin Studio.")
+st.divider()
+st.caption("Your images remain in your Google Drive. This app does not make your Drive folders public.")
