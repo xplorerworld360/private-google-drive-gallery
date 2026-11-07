@@ -1,26 +1,39 @@
-# Apple-inspired Private Google Drive Photos
+# Private Google Drive Gallery — Swipe Viewer + Password Login
 
-## Design and behaviour
-- Clean Apple Photos-inspired light interface.
-- Sidebar for All Photos and top-level albums.
-- Root All Photos view recursively collects images from every nested folder.
-- Album selection opens that folder and includes images from its descendant folders.
-- Folder tiles are shown separately from photo tiles; folders are never mixed into image results.
-- Responsive square thumbnail grid, 5 columns on desktop and fewer on smaller screens.
-- Click a photo to open a clean full-screen viewer.
-- Swipe left/right, keyboard arrows, close with Escape, and download original.
-- Filename search, newest/oldest/name sorting, density selector and pagination.
-- Password login; no Google OAuth sign-in.
-- Google Drive is read-only; manage files directly in Drive.
+## What this version includes
+- Original password-only login (no Google OAuth sign-in)
+- Read-only Service Account connection to Google Drive
+- Clean, compact gallery interface
+- Album selection, filename search and sorting
+- Swipe left/right on touch devices
+- Previous/next arrows and keyboard arrow navigation
+- Click image to open immersive viewer
+- Thumbnail strip for direct image selection
+- Download original image from viewer
+- Favourites toggle within the current viewer session
+- Page through larger collections
+- Manage files and folders directly in Google Drive
 
-## Root-folder behaviour
-The root view is intentionally named **All Photos**. It lists all image files recursively from the root and every nested album folder. The Albums section separately lists only direct child folders. Selecting an album filters the recursive image list to that album and its descendants. This avoids showing folder entries as if they were photos.
+## Fix for SSL RECORD_LAYER_FAILURE
+This version replaces the Google API client's older httplib2 transport with Google's `AuthorizedSession` using Requests. It includes HTTPS retries, explicit timeouts and certifi CA certificates. `runtime.txt` requests Python 3.12.10 instead of the Python 3.14 runtime shown in the deployment logs.
 
-## Google Drive setup
-Enable Drive API, create a service account, share the root folder with its `client_email` as Viewer, and place images in folders below the root.
+Do not disable SSL certificate verification.
 
-## Streamlit Secrets
-Keep `gallery_password`, `gdrive_root_folder_id`, and `[gdrive_service_account]` exactly as configured in your existing deployment. Do not commit the actual secrets file or private key to GitHub.
+## Google Drive configuration
+1. Enable Google Drive API in your Google Cloud project.
+2. Create a Service Account and download a JSON key.
+3. Create a root folder in Google Drive.
+4. Share that folder with the service-account `client_email` using Viewer permission.
+5. Create album subfolders directly inside the root folder.
+6. Add `gallery_password`, `gdrive_root_folder_id`, and all fields from the service-account JSON under `[gdrive_service_account]` in Streamlit Cloud → Manage app → Settings → Secrets.
+7. Do not upload `secrets.toml` or the JSON private key to GitHub.
 
-## Deployment
-Replace the app files with this project, keep `runtime.txt`, push to GitHub and reboot Streamlit Cloud.
+The code uses `https://www.googleapis.com/auth/drive.readonly`; all upload, rename and delete operations are performed manually in Google Drive.
+
+## Deploy
+Push all files to GitHub, including `runtime.txt`. Keep `.streamlit/secrets.toml` out of Git. Reboot the Streamlit app so the new runtime and dependencies are installed.
+
+## Troubleshooting
+- If SSL errors persist after this transport change and Python 3.12 runtime, inspect the latest Streamlit Cloud logs. Do not turn off TLS verification.
+- A 403 error generally means the Drive folder is not shared with the service account, the API is disabled, or the account lacks access.
+- An empty gallery can mean the root folder ID is wrong or album folders are not direct children of the root folder.
