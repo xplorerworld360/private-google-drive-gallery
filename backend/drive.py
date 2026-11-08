@@ -57,6 +57,33 @@ def _cached_folder_children(folder_id, service_token):
     return _list_folder_children(folder_id, service_token)
 
 
+@st.cache_data(ttl=900, max_entries=20, show_spinner=False)
+def _cached_all_gallery_items(root_id, service_token):
+    """Build a cached recursive index of all folders and media under the gallery root."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    all_items = []
+    pending = [str(root_id)]
+    seen_folders = {str(root_id)}
+    session_token = service_token
+
+    # Process folders in parallel by breadth-first levels. This avoids one
+    # serial API round-trip per nested folder while preventing duplicate scans.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        while pending:
+            current_level = pending
+            pending = []
+            results = list(pool.map(lambda folder_id: _list_folder_children(folder_id, session_token), current_level))
+            for folder_id, children in zip(current_level, results):
+                for item in children:
+                    item["_gallery_parent_id"] = folder_id
+                    all_items.append(item)
+                    if item.get("mimeType") == FOLDER_MIME and item["id"] not in seen_folders:
+                        seen_folders.add(item["id"])
+                        pending.append(item["id"])
+    return all_items
+
+
 @st.cache_data(ttl=1800, max_entries=2500, show_spinner=False)
 def _cached_thumbnail(url, token, thumbnail_version):
     if not url:
@@ -95,8 +122,14 @@ class DriveGallery:
             _cached_folder_children.clear()
         return _cached_folder_children(str(folder_id), self.token())
 
+    def get_all_items(self, force=False):
+        if force:
+            _cached_all_gallery_items.clear()
+        return _cached_all_gallery_items(self.root_id, self.token())
+
     def invalidate_index(self):
         _cached_folder_children.clear()
+        _cached_all_gallery_items.clear()
         _cached_thumbnail.clear()
 
     def folder_items(self, folder_id, force=False):
