@@ -1,126 +1,117 @@
-# Google Drive Gallery — Google Sign-In + Admin Studio
+# Blueglass Gallery — Shared Google Drive + Gmail Access Control
 
-A Streamlit photo/video gallery with account-specific Google Drive access, a separate admin page, fast metadata indexing, cached thumbnails, and Light/Dark appearance modes.
+## The intended model
 
-## Features
+- One owner maintains one central photo/video collection in their Google Drive.
+- Every visitor signs in with their own Google account (only `openid`, `email`, `profile` scopes).
+- The app checks the signed-in email against an access registry.
+- The owner can add Gmail addresses and assign:
+  - **Viewer** — view media only.
+  - **Downloader** — view and download originals.
+  - **Access manager** — view/download and manage Viewer/Downloader grants.
+- Only the owner can appoint another Access Manager.
+- The Admin page manages people and privileges only. There are no photo upload, rename, delete or folder-management functions.
+- All original photos stay in the owner's Google Drive. A server-side Service Account reads the shared gallery, so visitors never connect their personal Drive to this app.
 
-### Gallery
-- Google sign-in; no shared gallery password.
-- Each signed-in account gets a personal gallery folder named **My Streamlit Gallery** in its own My Drive.
-- Optional migration to an existing gallery root folder, but only when the signed-in account owns it.
-- Responsive thumbnail grid; comfortable/dense layout.
-- Root view recursively includes media in nested folders.
-- Album navigation, breadcrumb context, filename search and sorting.
-- Photo/video filters, session favourites and pagination.
-- Full-size viewer with previous/next navigation and original download.
-- Light and Dark theme switch.
+## Google Drive / Service Account setup
 
-### Admin Studio
-- Upload multiple images/videos to a selected album.
-- Create nested albums/folders.
-- Search and filter media.
-- Rename files and folders.
-- Move media between albums.
-- Move files to Google Drive Trash (recoverable), with confirmation.
-- Bulk move selected media to Trash.
-- Delete empty albums only; folders containing files must be emptied first.
-- Account page shows which Google account is connected.
+1. Create/select a Google Cloud project and enable Google Drive API.
+2. Create a Service Account and generate a JSON key.
+3. In the owner's Google Drive, create a folder named `Shared Gallery`.
+4. Add album folders and images/videos inside it.
+5. Share **only the Shared Gallery root folder** with the Service Account email as **Viewer**.
+6. Create a separate file in the owner's Drive named `gallery_access.json` with this exact starter content:
+   ```json
+   {
+     "users": {}
+   }
+   ```
+7. Share **only that `gallery_access.json` file** with the Service Account email as **Editor**. Do not grant the service account Editor permission on the gallery folder.
+8. Copy the IDs of the Shared Gallery folder and `gallery_access.json` file from their Drive URLs.
 
-### Account isolation
-The app creates or reuses a root folder owned by the signed-in Google account. Admin actions validate that a file or folder is inside this account's gallery root and is owned by that user. The app does not list or manage another account's gallery.
+Resulting permissions:
+- Shared Gallery folder → Service Account: Viewer.
+- gallery_access.json file → Service Account: Editor.
+- Visitors → no direct access to the owner's Drive. They only view content through the authenticated app.
 
-The OAuth token itself requests the broad Drive `drive` scope because the app needs to list existing files and create, upload, move, rename and trash files. Google describes this scope as permission to see, edit, create and delete all Drive files. The app's code limits its own Admin actions to the user's gallery root, but the underlying token is broader. Keep the application code private/trusted and review Google's verification requirements before public distribution.
+## Google OAuth setup (visitor sign-in)
 
-## Google Cloud setup
+1. In Google Cloud Console, open Google Auth Platform.
+2. Configure the app name, support email and developer contact.
+3. Choose **External** for regular Gmail accounts.
+4. Add `openid`, `email`, `profile` as the app's only end-user OAuth scopes.
+5. Create an OAuth Client ID of type **Web application**.
+6. Add the exact Streamlit app URL as an Authorized redirect URI, e.g. `https://your-app.streamlit.app`.
+7. Copy the OAuth Client ID and Client Secret.
 
-### 1. Create a project and enable Drive API
-1. Open https://console.cloud.google.com/
-2. Create a project or select an existing one.
-3. Enable **Google Drive API**: https://console.cloud.google.com/apis/library/drive.googleapis.com
+This app does **not** request a Google Drive scope from visitors. Drive is accessed server-side by the Service Account. The Google sign-in identifies the visitor; the allow-list decides if they may view or download.
 
-### 2. Configure OAuth consent
-1. Open Google Auth Platform: https://console.cloud.google.com/auth/overview
-2. Configure app name, support email and developer contact email.
-3. Choose **External** for personal Gmail accounts.
-4. Add your Gmail address as a **Test user** while the app is in Testing.
-5. Under Data Access, add:
-   - `openid`
-   - `email`
-   - `profile`
-   - `https://www.googleapis.com/auth/drive`
+For an External OAuth app left in Testing mode, add each permitted visitor as a test user in Google Auth Platform. For broad access, publish the consent screen to Production. Basic identity scopes are used here; do not add Drive scopes to the visitor OAuth client.
 
-### 3. Create OAuth Client ID
-1. Open https://console.cloud.google.com/auth/clients
-2. Click Create Client.
-3. Application type: **Web application**.
-4. Add the exact deployed URL as an Authorized redirect URI. Example:
-   `https://app-app-drive-gallery-gokul.streamlit.app`
-5. For local development also add:
-   `http://localhost:8501`
-6. Copy the Client ID and Client Secret.
+## Streamlit Cloud Secrets
 
-The redirect URI must exactly match the Streamlit Secrets value (scheme, hostname, case and trailing slash).
-
-### 4. Configure Streamlit Cloud Secrets
-Open the app in Streamlit Community Cloud → **Manage app → Settings → Secrets** and paste:
+Paste all values in Manage app → Settings → Secrets:
 
 ```toml
 [google_oauth]
 client_id = "YOUR_GOOGLE_OAUTH_CLIENT_ID"
 client_secret = "YOUR_GOOGLE_OAUTH_CLIENT_SECRET"
-redirect_uri = "https://app-app-drive-gallery-gokul.streamlit.app"
+redirect_uri = "https://your-app.streamlit.app"
 
-# Optional migration: reuse an existing gallery folder only if the signed-in account owns it.
-# legacy_gallery_folder_id = "YOUR_OLD_GALLERY_FOLDER_ID"
+[gallery]
+owner_email = "owner@gmail.com"
+root_folder_id = "SHARED_GALLERY_FOLDER_ID"
+access_registry_file_id = "GALLERY_ACCESS_JSON_FILE_ID"
+
+[gdrive_service_account]
+type = "service_account"
+project_id = "YOUR_PROJECT_ID"
+private_key_id = "YOUR_PRIVATE_KEY_ID"
+private_key = """-----BEGIN PRIVATE KEY-----
+YOUR_PRIVATE_KEY
+-----END PRIVATE KEY-----
+"""
+client_email = "YOUR_SERVICE_ACCOUNT_EMAIL"
+client_id = "YOUR_SERVICE_ACCOUNT_CLIENT_ID"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "YOUR_SERVICE_ACCOUNT_CERT_URL"
+universe_domain = "googleapis.com"
 ```
 
-For a legacy folder ID, put `legacy_gallery_folder_id` at the top level (before `[google_oauth]`):
+The Service Account must have Viewer access to the gallery folder and Editor access to the access registry JSON file. The app cannot persist access changes without Editor access to that one registry file.
 
-```toml
-legacy_gallery_folder_id = "YOUR_OLD_GALLERY_FOLDER_ID"
+## Deployment
 
-[google_oauth]
-client_id = "..."
-client_secret = "..."
-redirect_uri = "https://app-app-drive-gallery-gokul.streamlit.app"
-```
-
-If you omit `legacy_gallery_folder_id`, the app also checks the old top-level `gdrive_root_folder_id` secret used by the Service Account version. It reuses that folder only if the currently signed-in Google account owns it. Otherwise, each user gets a new `My Streamlit Gallery` folder in their own My Drive. Put any legacy ID above the `[google_oauth]` table in TOML; values after that header belong to the OAuth section.
-
-**Remove old Service Account secrets** (`gdrive_service_account`) from Streamlit Cloud after moving to this OAuth version. The new version does not use a Service Account or `gallery_password`.
-
-### 5. Deploy
-1. Commit the project files to GitHub.
-2. Set Streamlit's entry point to `app.py`.
+1. Push this project to GitHub.
+2. Select `app.py` as the Streamlit entry point.
 3. Add the Secrets above.
-4. Reboot the Streamlit app.
-5. Sign in with Google and grant Drive access.
-6. Open **Admin Studio** to upload images and create albums.
+4. Reboot the app.
+5. Sign in as the owner account first.
+6. Open Access Management and add visitor Gmail addresses.
 
-## Local development
+## Access roles
 
-```bash
-python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-streamlit run app.py
-```
+- Viewer: can browse gallery media, cannot download originals.
+- Downloader: can browse and download originals.
+- Access manager: can browse/download and manage Viewer/Downloader access. Cannot grant Access Manager.
+- Owner: fixed by `gallery.owner_email`, cannot be revoked or removed.
 
-Use `http://localhost:8501` as the local `redirect_uri` and register it in the OAuth client.
+Revocation disables access immediately on the next authorization check (registry cached for 30 seconds per browser session). Removing a user record permanently removes that email from the registry.
 
-## Performance design
-- One recursive Drive metadata index per Streamlit user session, cached for 10 minutes.
-- Folder traversal scans sibling folders concurrently.
-- Thumbnail bytes are cached per session and keyed by file ID + Drive thumbnail version/modified time.
-- Full-resolution bytes are fetched only when the user opens or downloads a media item.
-- Admin mutations invalidate the metadata and thumbnail caches.
+## Design and performance
 
-The first visit after login or a manual refresh must build the folder index. Subsequent gallery reruns, filtering and navigation reuse it.
+- Blue/white glass appearance with a Light/Dark switch.
+- Responsive photo/video grid, album navigation, breadcrumbs, search, sorting, media filters and favourites.
+- Full-resolution media fetched only when previewed or downloaded.
+- Recursive Drive metadata index cached for 10 minutes and thumbnails cached for 30 minutes.
+- Sibling folder requests run concurrently.
 
-## OAuth and deployment notes
-- Google OAuth uses an authorization-code flow, signed `state`, OpenID Connect nonce validation, account selection, offline access and token refresh.
-- This starter stores tokens in Streamlit session state, not a persistent token database. A new browser session or a server-side session reset may require signing in again.
-- OAuth apps left in Testing can have authorizations and refresh tokens expire after seven days when requesting Drive scopes. For ongoing use, move the consent screen to Production and satisfy Google's verification requirements that apply to the Drive scope.
-- Do not commit `.streamlit/secrets.toml`, client secrets, access tokens or refresh tokens to GitHub.
-- A public Streamlit URL lets visitors reach the sign-in page. Only Google accounts allowed by your OAuth consent configuration can authorize the app.
+## Security notes
+
+The web app's Service Account is a server-side principal. Share only the gallery folder as Viewer and only the ACL JSON file as Editor. Do not share the owner's entire Drive. Do not commit Streamlit Secrets, Service Account keys, OAuth client secrets or the ACL file contents to GitHub.
+
+The app restricts gallery results to the configured root and checks user roles before rendering the Gallery or Access Management pages. This is application-level access control, not a formal guarantee against vulnerabilities in the app or Streamlit hosting. Keep the repository private and deploy only trusted code.
+
+OAuth tokens are used only to identify the user and are not saved as Drive credentials. Streamlit session state holds the verified identity until logout or session expiry.
