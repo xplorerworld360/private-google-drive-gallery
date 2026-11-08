@@ -67,7 +67,12 @@ def _verify_state(state):
 
 def _flow(state=None):
     settings = _oauth_settings()
-    flow = Flow.from_client_config(_client_config(), scopes=IDENTITY_SCOPES, state=state)
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=IDENTITY_SCOPES,
+        state=state,
+        autogenerate_code_verifier=True,
+    )
     flow.redirect_uri = settings["redirect_uri"]
     return flow
 
@@ -75,6 +80,7 @@ def _flow(state=None):
 def _clear_login_state():
     for key in (
         "gallery_google_user",
+        "gallery_oauth_code_verifier",
         "gallery_google_login_error",
         "gallery_access_record",
         "gallery_user",
@@ -108,6 +114,12 @@ def _handle_callback():
 
     try:
         flow = _flow(state=state)
+        # PKCE: the verifier generated before redirect must be restored
+        # into the callback Flow before exchanging Google's authorization code.
+        code_verifier = st.session_state.pop("gallery_oauth_code_verifier", None)
+        if not code_verifier:
+            raise RuntimeError("The sign-in session expired or its PKCE verifier was lost. Please try signing in again.")
+        flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         token = flow.credentials.id_token
         if not token:
@@ -170,6 +182,9 @@ def require_google_user():
             prompt="select_account",
             nonce=nonce,
         )
+        # Save the PKCE verifier in this Streamlit browser session so it
+        # survives the round-trip to Google and can be used in _handle_callback.
+        st.session_state["gallery_oauth_code_verifier"] = flow.code_verifier
         st.link_button("Continue with Google", auth_url, type="primary", use_container_width=True)
         st.caption("Google shares your verified email and basic profile with this app. Your Google Drive is not connected to the visitor's account.")
     except Exception as exc:
