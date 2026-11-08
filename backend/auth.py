@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 import time
+import threading
 
 import streamlit as st
 from google.auth.transport.requests import Request
@@ -9,6 +10,36 @@ from google.oauth2 import id_token
 from google_auth_oauthlib.flow import Flow
 
 IDENTITY_SCOPES = ["openid", "email", "profile"]
+
+
+@st.cache_resource
+def _pending_oauth_store():
+    """Shared across Streamlit browser sessions and reruns in this app process."""
+    return {"lock": threading.Lock(), "verifiers": {}}
+
+
+def _save_code_verifier(state, verifier):
+    store = _pending_oauth_store()
+    now = time.time()
+    with store["lock"]:
+        # Remove expired sign-in attempts.
+        store["verifiers"] = {
+            key: value for key, value in store["verifiers"].items()
+            if now - value["created_at"] <= 900
+        }
+        store["verifiers"][state] = {
+            "code_verifier": verifier,
+            "created_at": now,
+        }
+
+
+def _take_code_verifier(state):
+    store = _pending_oauth_store()
+    with store["lock"]:
+        record = store["verifiers"].pop(state, None)
+    if not record or time.time() - record["created_at"] > 900:
+        return None
+    return record["code_verifier"]
 
 
 def _oauth_settings():
@@ -80,7 +111,6 @@ def _flow(state=None):
 def _clear_login_state():
     for key in (
         "gallery_google_user",
-        "gallery_oauth_code_verifier",
         "gallery_google_login_error",
         "gallery_access_record",
         "gallery_user",
@@ -114,11 +144,12 @@ def _handle_callback():
 
     try:
         flow = _flow(state=state)
-        # PKCE: the verifier generated before redirect must be restored
-        # into the callback Flow before exchanging Google's authorization code.
-        code_verifier = st.session_state.pop("gallery_oauth_code_verifier", None)
+        # Retrieve the original PKCE verifier by OAuth state. Unlike
+        # st.session_state, this cache survives Streamlit's browser reconnect
+        # after Google redirects back to the app.
+        code_verifier = _take_code_verifier(str(state))
         if not code_verifier:
-            raise RuntimeError("The sign-in session expired or its PKCE verifier was lost. Please try signing in again.")
+            raise RuntimeError("The sign-in attempt expired or its PKCE verifier was unavailable. Please start Google sign-in again.")
         flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         token = flow.credentials.id_token
@@ -182,9 +213,9 @@ def require_google_user():
             prompt="select_account",
             nonce=nonce,
         )
-        # Save the PKCE verifier in this Streamlit browser session so it
-        # survives the round-trip to Google and can be used in _handle_callback.
-        st.session_state["gallery_oauth_code_verifier"] = flow.code_verifier
+        # Persist verifier server-side, keyed by the signed state value,
+        # because Streamlit may create a new session after the Google redirect.
+        _save_code_verifier(state, flow.code_verifier)
         st.link_button("Continue with Google", auth_url, type="primary", use_container_width=True)
         st.caption("Google shares your verified email and basic profile with this app. Your Google Drive is not connected to the visitor's account.")
     except Exception as exc:
