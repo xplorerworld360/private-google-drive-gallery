@@ -9,7 +9,14 @@ from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 from google_auth_oauthlib.flow import Flow
 
-IDENTITY_SCOPES = ["openid", "email", "profile"]
+# Use Google's canonical scope URIs consistently for both authorization
+# and token exchange. The short aliases "email" and "profile" are expanded
+# by OAuth libraries and can trigger a scope-mismatch error on callback.
+IDENTITY_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+]
 
 
 @st.cache_resource
