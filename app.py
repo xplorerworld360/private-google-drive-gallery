@@ -89,7 +89,10 @@ with st.sidebar:
     st.divider()
     if st.button("↻  Refresh library", use_container_width=True):
         st.cache_data.clear()
-        drive.clear_thumbnail_cache()
+        # Backward-compatible: older DriveGallery modules may not expose this method.
+        clear_thumbnails = getattr(drive, "clear_thumbnail_cache", None)
+        if callable(clear_thumbnails):
+            clear_thumbnails()
         st.rerun()
     st.link_button("Open Google Drive ↗", "https://drive.google.com/drive/my-drive", use_container_width=True)
     st.caption("Add, move or delete images directly in Google Drive.")
