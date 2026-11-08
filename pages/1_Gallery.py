@@ -44,21 +44,21 @@ root_folders = sorted(
 )
 
 # Folder browser is shown in the center of the page.
-st.markdown("### Your albums")
-if root_folders:
-    folder_cols = st.columns(4, gap="medium")
-    for i, folder in enumerate(root_folders):
-        with folder_cols[i % len(folder_cols)]:
-            with st.container(border=True):
-                st.markdown("📁")
-                st.markdown(f"**{folder.get('name', 'Untitled folder')}**")
-                st.caption("Browse this folder")
-                if st.button("Open folder →", key=f"open_folder_{folder['id']}", use_container_width=True):
-                    st.session_state.shared_gallery_folder = folder["id"]
-                    st.session_state.shared_gallery_current_folder = folder
-                    st.rerun()
-else:
-    st.caption("No subfolders found in the main gallery folder.")
+# st.markdown("### Your albums")
+# if root_folders:
+#     folder_cols = st.columns(4, gap="medium")
+#     for i, folder in enumerate(root_folders):
+#         with folder_cols[i % len(folder_cols)]:
+#             with st.container(border=True):
+#                 st.markdown("📁")
+#                 st.markdown(f"**{folder.get('name', 'Untitled folder')}**")
+#                 st.caption("Browse this folder")
+#                 if st.button("Open folder →", key=f"open_folder_{folder['id']}", use_container_width=True):
+#                     st.session_state.shared_gallery_folder = folder["id"]
+#                     st.session_state.shared_gallery_current_folder = folder
+#                     st.rerun()
+# else:
+#     st.caption("No subfolders found in the main gallery folder.")
 
 # current_folder_id = st.session_state.shared_gallery_folder
 # if current_folder_id != root_id:
