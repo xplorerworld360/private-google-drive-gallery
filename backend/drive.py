@@ -24,23 +24,25 @@ def _http_session(token):
 
 
 def _list_folder_children(folder_id, token):
+    """List only media and child folders for one Drive folder."""
     session = _http_session(token)
-    # Fetch direct children without MIME substring filters; Drive supports classification locally.
-    query = f"'{folder_id}' in parents and trashed=false"
+    query = (
+        f"'{folder_id}' in parents and trashed=false and "
+        f"(mimeType='{FOLDER_MIME}' or mimeType contains 'image/' or mimeType contains 'video/')"
+    )
     result, page_token = [], None
     try:
         while True:
             params = {
                 "q": query,
                 "pageSize": 1000,
-                "orderBy": "name",
                 "fields": "nextPageToken,files(id,name,mimeType,modifiedTime,size,parents,thumbnailLink,thumbnailVersion,webViewLink)",
                 "supportsAllDrives": "true",
                 "includeItemsFromAllDrives": "true",
             }
             if page_token:
                 params["pageToken"] = page_token
-            response = session.get(FILES_URL, params=params, timeout=(12, 45))
+            response = session.get(FILES_URL, params=params, timeout=(8, 30))
             response.raise_for_status()
             data = response.json()
             result.extend(data.get("files", []))
@@ -57,30 +59,32 @@ def _cached_folder_children(folder_id, service_token):
     return _list_folder_children(folder_id, service_token)
 
 
-@st.cache_data(ttl=900, max_entries=20, show_spinner=False)
+@st.cache_data(ttl=1800, max_entries=20, show_spinner=False)
 def _cached_all_gallery_items(root_id, service_token):
-    """Build a cached recursive index of all folders and media under the gallery root."""
-    from concurrent.futures import ThreadPoolExecutor
+    """Discover every nested folder concurrently and return all media once."""
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
     all_items = []
-    pending = [str(root_id)]
     seen_folders = {str(root_id)}
-    session_token = service_token
-
-    # Process folders in parallel by breadth-first levels. This avoids one
-    # serial API round-trip per nested folder while preventing duplicate scans.
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        while pending:
-            current_level = pending
-            pending = []
-            results = list(pool.map(lambda folder_id: _list_folder_children(folder_id, session_token), current_level))
-            for folder_id, children in zip(current_level, results):
+    executor = ThreadPoolExecutor(max_workers=12)
+    futures = {executor.submit(_list_folder_children, str(root_id), service_token): str(root_id)}
+    try:
+        while futures:
+            completed, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in completed:
+                folder_id = futures.pop(future)
+                children = future.result()
                 for item in children:
                     item["_gallery_parent_id"] = folder_id
-                    all_items.append(item)
-                    if item.get("mimeType") == FOLDER_MIME and item["id"] not in seen_folders:
-                        seen_folders.add(item["id"])
-                        pending.append(item["id"])
+                    if item.get("mimeType") == FOLDER_MIME:
+                        child_id = item.get("id")
+                        if child_id and child_id not in seen_folders:
+                            seen_folders.add(child_id)
+                            futures[executor.submit(_list_folder_children, child_id, service_token)] = child_id
+                    elif item.get("mimeType", "").startswith(("image/", "video/")):
+                        all_items.append(item)
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
     return all_items
 
 
@@ -96,6 +100,27 @@ def _cached_thumbnail(url, token, thumbnail_version):
         return None
     except requests.RequestException:
         return None
+    finally:
+        session.close()
+
+
+@st.cache_data(ttl=600, max_entries=80, show_spinner=False)
+def _cached_media_bytes(file_id, token, modified_time):
+    """Cache full media bytes so zoom/preview reruns do not re-download originals."""
+    session = _http_session(token)
+    try:
+        response = session.get(
+            f"{FILES_URL}/{file_id}",
+            params={"alt": "media", "supportsAllDrives": "true"},
+            timeout=(12, 180),
+            stream=True,
+        )
+        response.raise_for_status()
+        chunks = []
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                chunks.append(chunk)
+        return b"".join(chunks)
     finally:
         session.close()
 
@@ -131,6 +156,7 @@ class DriveGallery:
         _cached_folder_children.clear()
         _cached_all_gallery_items.clear()
         _cached_thumbnail.clear()
+        _cached_media_bytes.clear()
 
     def folder_items(self, folder_id, force=False):
         return self.get_folder_children(folder_id, force=force)
@@ -152,16 +178,8 @@ class DriveGallery:
         if not any(child.get("id") == item.get("id") and child.get("mimeType", "").startswith(("image/", "video/"))
                    for child in allowed):
             raise PermissionError("This file is outside the configured gallery.")
-        response = self.session.get(
-            f"{FILES_URL}/{item['id']}",
-            params={"alt": "media"},
-            timeout=(15, 180),
-            stream=True,
+        return _cached_media_bytes(
+            str(item["id"]),
+            self.token(),
+            item.get("modifiedTime", ""),
         )
-        response.raise_for_status()
-        chunks = []
-        for chunk in response.iter_content(chunk_size=512 * 1024):
-            if chunk:
-                chunks.append(chunk)
-        response.close()
-        return b"".join(chunks)
