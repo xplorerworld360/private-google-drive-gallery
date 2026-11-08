@@ -1,36 +1,37 @@
+from concurrent.futures import ThreadPoolExecutor
+import math
 import streamlit as st
+
 from backend.auth import require_login
 from backend.drive import DriveGallery
 
 st.set_page_config(
-    page_title="My Private Gallery",
-    page_icon="🖼️",
+    page_title="Photos",
+    page_icon="📷",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
-html, body, [class*="css"] {font-family:'DM Sans',sans-serif;}
-.block-container {max-width:1600px;padding-top:1.35rem;padding-bottom:3rem;}
-[data-testid="stAppViewContainer"] {background:linear-gradient(145deg,#10131b 0%,#171d2a 55%,#11151e 100%);}
-[data-testid="stHeader"] {background:transparent;}
-h1,h2,h3 {font-family:'Manrope',sans-serif;letter-spacing:-.035em;}
-section[data-testid="stSidebar"] {background:#111722;border-right:1px solid #ffffff12;}
-.hero {padding:1.55rem 1.7rem;border:1px solid #ffffff18;border-radius:22px;background:linear-gradient(115deg,#626cff30,#23c6a018);margin-bottom:1.15rem;}
-.eyebrow {font-size:.73rem;text-transform:uppercase;letter-spacing:.16em;color:#aeb9d2;font-weight:700;}
-.hero-title {font-family:'Manrope',sans-serif;font-size:clamp(1.8rem,3vw,2.55rem);font-weight:800;line-height:1.12;margin:.4rem 0;}
-.hero-sub {color:#b7c1d4;font-size:.95rem;max-width:760px;}
-.metric {padding:1rem 1.1rem;border:1px solid #ffffff17;border-radius:16px;background:#ffffff08;min-height:88px;}
-.metric-label {font-size:.72rem;letter-spacing:.09em;color:#aeb9cc;font-weight:700;}
-.metric-value {font-family:'Manrope',sans-serif;font-size:1.45rem;font-weight:800;margin-top:.2rem;}
-div[data-testid="stImage"] img {border-radius:14px;object-fit:cover;}
-div.stButton > button, div.stDownloadButton > button {border-radius:11px;font-weight:600;}
-div[data-testid="stTextInput"] input {border-radius:12px;}
-div[data-testid="stSelectbox"] div[role="combobox"] {border-radius:12px;}
-.muted {color:#aeb9cc;font-size:.84rem;}
-.card-title {font-weight:700;overflow-wrap:anywhere;}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+html,body,[class*="css"]{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+[data-testid="stAppViewContainer"]{background:#f5f5f7;color:#1d1d1f}
+[data-testid="stHeader"]{background:rgba(245,245,247,.88);backdrop-filter:blur(18px)}
+.block-container{max-width:1750px;padding:1.2rem 2rem 2.6rem}
+section[data-testid="stSidebar"]{background:#fbfbfd;border-right:1px solid #e7e7eb}
+section[data-testid="stSidebar"] *{color:#252529}
+h1,h2,h3{color:#1d1d1f;font-family:Inter,sans-serif;letter-spacing:-.04em}
+h1{font-weight:800}
+div[data-testid="stTextInput"] input,div[data-testid="stSelectbox"] div[role="combobox"]{border-radius:12px;background:white;border-color:#e3e3e8}
+div.stButton>button,div.stDownloadButton>button{border-radius:10px}
+div[data-testid="stImage"] img{border-radius:12px}
+.topline{font-size:.72rem;letter-spacing:.13em;color:#86868b;font-weight:750;text-transform:uppercase}
+.subtitle{color:#6e6e73;font-size:.92rem}
+.section-title{font-size:1.05rem;font-weight:750;letter-spacing:-.025em;color:#1d1d1f}
+div[data-testid="stHorizontalBlock"]{gap:.7rem}
+[data-testid="stMetric"]{background:white;border:1px solid #ececf0;border-radius:14px;padding:12px 15px}
+div[data-testid="stAlert"]{border-radius:13px}
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,168 +43,223 @@ def get_drive():
 
 try:
     drive = get_drive()
-    albums = drive.list_albums()
 except Exception as exc:
-    st.error(f"Unable to connect to Google Drive: {exc}")
-    st.info("Check your service-account credentials and confirm the Drive folder is shared with the service-account email.")
+    st.error("Google Drive connection failed.")
+    st.code(str(exc))
+    st.info("Check your Service Account credentials in Streamlit Secrets and make sure the root folder is shared with the Service Account email as Viewer.")
+    if st.button("Retry connection"):
+        st.rerun()
     st.stop()
 
-# Load image metadata once per run; image bytes are fetched only for visible cards.
-all_images = drive.list_images()
-total_bytes = sum(int(x.get("size", 0) or 0) for x in all_images)
-total_mb = total_bytes / (1024 * 1024)
+# Folder navigation state.
+root_id = drive.root_id
+if "folder_id" not in st.session_state:
+    st.session_state.folder_id = root_id
+if "folder_name" not in st.session_state:
+    st.session_state.folder_name = "All Photos"
+if "folder_path" not in st.session_state:
+    st.session_state.folder_path = []
 
-st.markdown("""
-<div class="hero">
-  <div class="eyebrow">A private space for your collection</div>
-  <div class="hero-title">Your gallery, beautifully organised.</div>
-  <div class="hero-sub">Explore your albums, search your collection and enjoy your images in a clean, modern gallery. Your originals stay in Google Drive.</div>
-</div>
-""", unsafe_allow_html=True)
+current_id = st.session_state.folder_id
+current_name = st.session_state.folder_name
+is_root = current_id == root_id
 
-m1, m2, m3, m4 = st.columns(4)
-for col, label, value in [
-    (m1, "ALBUMS", len(albums)),
-    (m2, "IMAGES", len(all_images)),
-    (m3, "TOTAL IMAGE SIZE", f"{total_mb:.1f} MB"),
-    (m4, "STORAGE", "Google Drive"),
-]:
-    with col:
-        st.markdown(
-            f'<div class="metric"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>',
-            unsafe_allow_html=True,
-        )
+# Sidebar contains navigation only; no extra admin module.
+with st.sidebar:
+    st.markdown("## Photos")
+    st.caption("Your private Google Drive library")
+    st.divider()
+    if st.button("▦  All Photos", use_container_width=True, type="primary" if is_root else "secondary"):
+        st.session_state.folder_id = root_id
+        st.session_state.folder_name = "All Photos"
+        st.session_state.folder_path = []
+        st.rerun()
+    st.markdown("**Albums**")
+    try:
+        root_folders = drive.list_folders(root_id)
+        for folder in root_folders:
+            if st.button(("▣  " if current_id == folder["id"] else "▢  ") + folder["name"],
+                         key=f"nav_{folder['id']}", use_container_width=True):
+                st.session_state.folder_id = folder["id"]
+                st.session_state.folder_name = folder["name"]
+                st.session_state.folder_path = [{"id": folder["id"], "name": folder["name"]}]
+                st.rerun()
+    except Exception as exc:
+        st.caption(f"Folders unavailable: {exc}")
+    st.divider()
+    if st.button("↻  Refresh library", use_container_width=True):
+        st.cache_data.clear()
+        drive.clear_thumbnail_cache()
+        st.rerun()
+    st.link_button("Open Google Drive ↗", "https://drive.google.com/drive/my-drive", use_container_width=True)
+    st.caption("Add, move or delete images directly in Google Drive.")
 
-st.write("")
-heading, count_col = st.columns([3, 1])
-with heading:
-    st.subheader("Explore your collection")
-with count_col:
-    st.markdown('<div class="muted" style="text-align:right;padding-top:14px">Private · Read-only gallery</div>', unsafe_allow_html=True)
-
-albums_by_name = {a["name"]: a for a in albums}
-album_options = ["All albums"] + sorted(albums_by_name.keys(), key=str.lower)
-
-f1, f2, f3, f4 = st.columns([1.45, 2.2, 1.1, 1.1])
-with f1:
-    selected_album = st.selectbox("Album", album_options, label_visibility="collapsed")
-with f2:
-    search = st.text_input("Search", placeholder="⌕  Search by filename…", label_visibility="collapsed")
-with f3:
-    sort_by = st.selectbox("Sort", ["Newest first", "Oldest first", "Name A–Z", "Name Z–A"], label_visibility="collapsed")
-with f4:
-    layout = st.selectbox("Grid", ["Comfortable", "Compact"], label_visibility="collapsed")
-
-album_id = None if selected_album == "All albums" else albums_by_name[selected_album]["id"]
-images = drive.list_images(album_id=album_id, query=search.strip())
-
-if sort_by == "Newest first":
-    images.sort(key=lambda x: x.get("modifiedTime", ""), reverse=True)
-elif sort_by == "Oldest first":
-    images.sort(key=lambda x: x.get("modifiedTime", ""))
-elif sort_by == "Name A–Z":
-    images.sort(key=lambda x: x.get("name", "").lower())
+st.markdown('<div class="topline">YOUR LIBRARY</div>', unsafe_allow_html=True)
+st.title("All Photos" if is_root else current_name)
+if is_root:
+    st.markdown('<div class="subtitle">All photos from your root folder and nested albums.</div>', unsafe_allow_html=True)
 else:
-    images.sort(key=lambda x: x.get("name", "").lower(), reverse=True)
+    breadcrumb = ["All Photos"] + [x["name"] for x in st.session_state.folder_path]
+    st.markdown('<div class="subtitle">' + " / ".join(breadcrumb) + '</div>', unsafe_allow_html=True)
+    if st.button("← Back to All Photos"):
+        st.session_state.folder_id = root_id
+        st.session_state.folder_name = "All Photos"
+        st.session_state.folder_path = []
+        st.rerun()
 
-# Session-only favourites; nothing is written to Drive.
+# Controls are light, compact and server-side searchable.
+c1, c2, c3, c4 = st.columns([2.2, 1.0, 1.0, 1.0])
+with c1:
+    search = st.text_input("Search", placeholder="Search your photos by filename…", label_visibility="collapsed")
+with c2:
+    sort = st.selectbox("Sort", ["Newest first", "Oldest first", "Name A–Z", "Name Z–A"], label_visibility="collapsed")
+with c3:
+    density = st.selectbox("Grid", ["Comfortable", "Dense"], label_visibility="collapsed")
+with c4:
+    scope = st.selectbox("Search scope", ["This album", "All Photos"], label_visibility="collapsed")
+
+target_id = root_id if scope == "All Photos" else current_id
+
+try:
+    with st.spinner("Reading your library…" if "metadata_loaded" not in st.session_state else ""):
+        # Metadata is cached for 10 minutes. Root collection recursively includes subfolders.
+        images = drive.list_images_recursive(target_id, query=search.strip())
+        folders = drive.list_folders(current_id)
+except Exception as exc:
+    st.error(f"Could not read your Drive library: {exc}")
+    st.stop()
+
+if sort == "Newest first":
+    images.sort(key=lambda x: x.get("modifiedTime", ""), reverse=True)
+elif sort == "Oldest first":
+    images.sort(key=lambda x: x.get("modifiedTime", ""))
+elif sort == "Name A–Z":
+    images.sort(key=lambda x: x.get("name", "").casefold())
+else:
+    images.sort(key=lambda x: x.get("name", "").casefold(), reverse=True)
+
+# Favourites are retained for this browser session.
 if "favourites" not in st.session_state:
     st.session_state.favourites = set()
-
 show_favourites = st.toggle("Show favourites only", value=False)
 if show_favourites:
     images = [x for x in images if x["id"] in st.session_state.favourites]
 
-page_size = 20
+# Album folders are separate from image tiles.
+if folders and scope == "This album" and not search:
+    st.markdown('<div class="section-title">Albums</div>', unsafe_allow_html=True)
+    folder_cols = st.columns(5)
+    for i, folder in enumerate(folders):
+        with folder_cols[i % len(folder_cols)]:
+            with st.container(border=True):
+                st.markdown(f"📁 **{folder['name']}**")
+                st.caption("Open folder")
+                if st.button("Open →", key=f"open_{folder['id']}", use_container_width=True):
+                    st.session_state.folder_id = folder["id"]
+                    st.session_state.folder_name = folder["name"]
+                    st.session_state.folder_path = st.session_state.folder_path + [{"id": folder["id"], "name": folder["name"]}]
+                    st.rerun()
+
+st.markdown(f'<div class="section-title">Photos <span style="color:#86868b;font-weight:500">· {len(images)}</span></div>',
+            unsafe_allow_html=True)
+
+# 60 image metadata records per page; only small Drive thumbnails are fetched for visible tiles.
+PAGE_SIZE = 60
+page_count = max(1, math.ceil(len(images) / PAGE_SIZE))
 if "gallery_page" not in st.session_state:
     st.session_state.gallery_page = 1
-max_pages = max(1, (len(images) + page_size - 1) // page_size)
-st.session_state.gallery_page = min(st.session_state.gallery_page, max_pages)
-
-if search or selected_album != "All albums" or show_favourites:
+filter_key = (target_id, current_id, search, sort, density, show_favourites)
+if st.session_state.get("gallery_filter_key") != filter_key:
+    st.session_state.gallery_filter_key = filter_key
     st.session_state.gallery_page = 1
+st.session_state.gallery_page = min(st.session_state.gallery_page, page_count)
+offset = (st.session_state.gallery_page - 1) * PAGE_SIZE
+visible = images[offset:offset + PAGE_SIZE]
 
-start = (st.session_state.gallery_page - 1) * page_size
-visible = images[start:start + page_size]
-st.caption(f"Showing {len(visible)} of {len(images)} image(s) · {selected_album}")
+# Thumbnail downloads run in parallel; cached thumbnails are reused across Streamlit reruns.
+if visible:
+    with st.spinner("Loading photo previews…" if "metadata_loaded" not in st.session_state else ""):
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            thumbs = list(executor.map(drive.get_thumbnail, visible))
+    st.session_state.metadata_loaded = True
 
-if not images:
-    st.info("No images found. Add images or create album folders directly in your Google Drive, then refresh this page.")
-else:
-    ncols = 5 if layout == "Compact" else 4
-    for row_start in range(0, len(visible), ncols):
-        columns = st.columns(ncols, gap="medium")
-        for col, item in zip(columns, visible[row_start:row_start+ncols]):
+    columns_per_row = 7 if density == "Dense" else 5
+    for row_start in range(0, len(visible), columns_per_row):
+        row_items = visible[row_start:row_start + columns_per_row]
+        row_thumbs = thumbs[row_start:row_start + columns_per_row]
+        cols = st.columns(columns_per_row, gap="small")
+        for col, item, thumb in zip(cols, row_items, row_thumbs):
             with col:
-                try:
-                    data = drive.download_bytes(item["id"])
-                    st.image(data, use_container_width=True)
-                    name = item.get("name", "Untitled image")
-                    st.markdown(f'<div class="card-title">{name}</div>', unsafe_allow_html=True)
-                    size = int(item.get("size", 0) or 0)
-                    date = item.get("modifiedTime", "")[:10]
-                    st.caption(f"{date} · {size/1024:.0f} KB" if size else date)
-                    fav = item["id"] in st.session_state.favourites
-                    b1, b2 = st.columns([1, 1])
-                    with b1:
-                        if st.button("♥ Saved" if fav else "♡ Save", key=f"fav_{item['id']}", use_container_width=True):
-                            if fav:
-                                st.session_state.favourites.remove(item["id"])
-                            else:
-                                st.session_state.favourites.add(item["id"])
-                            st.rerun()
-                    with b2:
-                        st.download_button(
-                            "↓ Download",
-                            data=data,
-                            file_name=name,
-                            mime=item.get("mimeType", "application/octet-stream"),
-                            key=f"download_{item['id']}",
-                            use_container_width=True,
-                        )
-                    if st.button("View image", key=f"view_{item['id']}", use_container_width=True):
-                        st.session_state["selected_image"] = item["id"]
-                        st.session_state["selected_image_name"] = name
+                if thumb:
+                    st.image(thumb, use_container_width=True)
+                else:
+                    st.markdown(
+                        '<div style="height:130px;border-radius:12px;background:#e8e8ed;display:grid;place-items:center;color:#8e8e93">Preview unavailable</div>',
+                        unsafe_allow_html=True,
+                    )
+                name = item.get("name", "Photo")
+                st.caption(name)
+                star_col, open_col = st.columns([1, 1])
+                is_fav = item["id"] in st.session_state.favourites
+                with star_col:
+                    if st.button("★" if is_fav else "☆", key=f"star_{item['id']}", help="Favourite", use_container_width=True):
+                        if is_fav:
+                            st.session_state.favourites.remove(item["id"])
+                        else:
+                            st.session_state.favourites.add(item["id"])
                         st.rerun()
-                except Exception as exc:
-                    st.warning(f"Could not load {item.get('name', 'image')}: {exc}")
+                with open_col:
+                    if st.button("Open", key=f"open_photo_{item['id']}", use_container_width=True):
+                        st.session_state.selected_photo_id = item["id"]
+                        st.session_state.selected_photo_name = name
+                        st.rerun()
+else:
+    st.info("No photos found. Add images to Google Drive or choose another album.")
 
-    if max_pages > 1:
-        p1, p2, p3 = st.columns([1, 2, 1])
-        with p1:
-            if st.button("← Previous", disabled=st.session_state.gallery_page <= 1, use_container_width=True):
-                st.session_state.gallery_page -= 1
+# Full-resolution bytes are fetched only when the user opens a single photo.
+if st.session_state.get("selected_photo_id"):
+    selected_id = st.session_state.selected_photo_id
+    selected_item = next((x for x in images if x["id"] == selected_id), None)
+    if selected_item is None:
+        st.session_state.pop("selected_photo_id", None)
+        st.session_state.pop("selected_photo_name", None)
+    else:
+        @st.dialog("Photo preview", width="large")
+        def photo_dialog(item):
+            try:
+                original = drive.download_bytes(item["id"])
+                st.image(original, use_container_width=True)
+                st.markdown(f"**{item.get('name', 'Photo')}**")
+                left, mid, right = st.columns([1, 1, 1])
+                with left:
+                    st.download_button("Download original", original, file_name=item.get("name", "photo"), mime=item.get("mimeType", "application/octet-stream"), use_container_width=True)
+                with mid:
+                    if st.button("Previous", use_container_width=True):
+                        idx = next((i for i, x in enumerate(images) if x["id"] == item["id"]), 0)
+                        st.session_state.selected_photo_id = images[(idx - 1) % len(images)]["id"]
+                        st.rerun()
+                with right:
+                    if st.button("Next", use_container_width=True):
+                        idx = next((i for i, x in enumerate(images) if x["id"] == item["id"]), 0)
+                        st.session_state.selected_photo_id = images[(idx + 1) % len(images)]["id"]
+                        st.rerun()
+            except Exception as exc:
+                st.error(f"Could not open original image: {exc}")
+            if st.button("Close viewer"):
+                st.session_state.pop("selected_photo_id", None)
+                st.session_state.pop("selected_photo_name", None)
                 st.rerun()
-        with p2:
-            st.markdown(f"<div style='text-align:center;padding:.5rem'>Page {st.session_state.gallery_page} of {max_pages}</div>", unsafe_allow_html=True)
-        with p3:
-            if st.button("Next →", disabled=st.session_state.gallery_page >= max_pages, use_container_width=True):
-                st.session_state.gallery_page += 1
-                st.rerun()
+        photo_dialog(selected_item)
 
-if st.session_state.get("selected_image"):
-    selected_id = st.session_state["selected_image"]
-    try:
-        selected_data = drive.download_bytes(selected_id)
-        st.divider()
-        st.subheader(st.session_state.get("selected_image_name", "Image preview"))
-        st.image(selected_data, use_container_width=True)
-        if st.button("Close image viewer"):
-            st.session_state.pop("selected_image", None)
-            st.session_state.pop("selected_image_name", None)
+if page_count > 1:
+    a, b, c = st.columns([1, 2, 1])
+    with a:
+        if st.button("← Previous", disabled=st.session_state.gallery_page <= 1, use_container_width=True):
+            st.session_state.gallery_page -= 1
             st.rerun()
-    except Exception as exc:
-        st.error(f"Unable to open image: {exc}")
-
-with st.sidebar:
-    st.markdown("## 🖼️ My Gallery")
-    st.caption("Private Google Drive collection")
-    st.divider()
-    st.markdown("**Manage your collection**")
-    st.write("Add, rename, move or delete images directly in Google Drive.")
-    st.link_button("Open Google Drive", "https://drive.google.com/drive/my-drive", use_container_width=True)
-    if st.button("Refresh gallery", use_container_width=True):
-        st.rerun()
-    st.divider()
-    st.caption("The gallery is read-only. Changes made in Google Drive appear after refreshing.")
-    st.caption("Your Drive files are not made public by this app.")
+    with b:
+        st.markdown(f"<div style='text-align:center;padding:.5rem;color:#777'>Page {st.session_state.gallery_page} of {page_count}</div>", unsafe_allow_html=True)
+    with c:
+        if st.button("Next →", disabled=st.session_state.gallery_page >= page_count, use_container_width=True):
+            st.session_state.gallery_page += 1
+            st.rerun()

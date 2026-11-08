@@ -1,39 +1,38 @@
-# Private Google Drive Gallery — Swipe Viewer + Password Login
+# Optimized Private Google Drive Gallery
 
-## What this version includes
-- Original password-only login (no Google OAuth sign-in)
-- Read-only Service Account connection to Google Drive
-- Clean, compact gallery interface
-- Album selection, filename search and sorting
-- Swipe left/right on touch devices
-- Previous/next arrows and keyboard arrow navigation
-- Click image to open immersive viewer
-- Thumbnail strip for direct image selection
-- Download original image from viewer
-- Favourites toggle within the current viewer session
-- Page through larger collections
-- Manage files and folders directly in Google Drive
+## Performance changes
+- Builds one recursive gallery metadata index in parallel (10 folder workers) and caches it for 10 minutes.
+- Folder navigation and filename search are local filters after the first index build.
+- Caches Drive thumbnails in a bounded in-process cache.
+- Uses Drive `thumbnailLink` instead of downloading full image originals for grid previews. Google documents that thumbnail links are short-lived and private files require credentialed requests.
+- Fetches thumbnails concurrently (10 workers).
+- Downloads full-resolution content only after opening a photo.
+- Pages 60 items at a time.
+- Uses lightweight fields for metadata listing and only loads current folder hierarchy.
+- Refresh library clears Streamlit's metadata and thumbnail caches.
 
-## Fix for SSL RECORD_LAYER_FAILURE
-This version replaces the Google API client's older httplib2 transport with Google's `AuthorizedSession` using Requests. It includes HTTPS retries, explicit timeouts and certifi CA certificates. `runtime.txt` requests Python 3.12.10 instead of the Python 3.14 runtime shown in the deployment logs.
+## UI/features
+- Apple-inspired light interface.
+- Root All Photos recursively collects images from nested folders.
+- Sidebar album navigation, folder cards and breadcrumbs.
+- Search by filename across current album or all photos.
+- Sort newest/oldest/name.
+- Comfortable/dense responsive grid.
+- Session favourites.
+- Full-resolution modal viewer with download and previous/next controls.
+- Password login; no Google OAuth sign-in.
+- Read-only Drive access; file management is done directly in Google Drive.
 
-Do not disable SSL certificate verification.
+## Drive setup
+Keep your existing Streamlit Secrets:
+- `gallery_password`
+- `gdrive_root_folder_id`
+- `[gdrive_service_account]` with your service-account JSON fields.
 
-## Google Drive configuration
-1. Enable Google Drive API in your Google Cloud project.
-2. Create a Service Account and download a JSON key.
-3. Create a root folder in Google Drive.
-4. Share that folder with the service-account `client_email` using Viewer permission.
-5. Create album subfolders directly inside the root folder.
-6. Add `gallery_password`, `gdrive_root_folder_id`, and all fields from the service-account JSON under `[gdrive_service_account]` in Streamlit Cloud → Manage app → Settings → Secrets.
-7. Do not upload `secrets.toml` or the JSON private key to GitHub.
-
-The code uses `https://www.googleapis.com/auth/drive.readonly`; all upload, rename and delete operations are performed manually in Google Drive.
+Share the root folder with the Service Account email as Viewer. Do not commit secrets or private keys to GitHub.
 
 ## Deploy
-Push all files to GitHub, including `runtime.txt`. Keep `.streamlit/secrets.toml` out of Git. Reboot the Streamlit app so the new runtime and dependencies are installed.
+Replace the project files with this archive's files, include `runtime.txt`, push to GitHub and reboot Streamlit Cloud.
 
-## Troubleshooting
-- If SSL errors persist after this transport change and Python 3.12 runtime, inspect the latest Streamlit Cloud logs. Do not turn off TLS verification.
-- A 403 error generally means the Drive folder is not shared with the service account, the API is disabled, or the account lacks access.
-- An empty gallery can mean the root folder ID is wrong or album folders are not direct children of the root folder.
+## Notes
+Google Drive API's `thumbnailLink` is short-lived and private thumbnails must be fetched with credentials. This application caches downloaded thumbnail bytes for 20 minutes and metadata for 10 minutes; use Refresh library to invalidate caches after Drive changes. Sources: https://developers.google.com/workspace/drive/api/guides/file-metadata
