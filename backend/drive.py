@@ -51,49 +51,10 @@ def _list_folder_children(folder_id, token):
         session.close()
 
 
-@st.cache_data(ttl=600, max_entries=20, show_spinner=False)
-def _cached_gallery_index(root_id, service_token):
-    media = []
-    folders_by_id = {
-        root_id: {"id": root_id, "name": "Gallery", "mimeType": FOLDER_MIME, "parents": []}
-    }
-    folder_parent = {root_id: None}
-    children_by_parent = {root_id: []}
-    visited = {root_id}
-    frontier = [root_id]
-
-    while frontier:
-        batch = frontier
-        frontier = []
-        with ThreadPoolExecutor(max_workers=min(10, len(batch))) as pool:
-            child_batches = list(pool.map(
-                lambda folder_id: _list_folder_children(folder_id, service_token),
-                batch,
-            ))
-
-        for parent_id, children in zip(batch, child_batches):
-            children_by_parent.setdefault(parent_id, [])
-            for item in children:
-                item["_gallery_parent_id"] = parent_id
-                children_by_parent[parent_id].append(item)
-                if item.get("mimeType") == FOLDER_MIME:
-                    folder_id = item["id"]
-                    if folder_id not in visited:
-                        visited.add(folder_id)
-                        folders_by_id[folder_id] = item
-                        folder_parent[folder_id] = parent_id
-                        children_by_parent.setdefault(folder_id, [])
-                        frontier.append(folder_id)
-                elif item.get("mimeType", "").startswith(("image/", "video/")):
-                    media.append(item)
-
-    return {
-        "media": media,
-        "media_by_id": {item["id"]: item for item in media},
-        "folders_by_id": folders_by_id,
-        "folder_parent": folder_parent,
-        "children_by_parent": children_by_parent,
-    }
+@st.cache_data(ttl=600, max_entries=500, show_spinner=False)
+def _cached_folder_children(folder_id, service_token):
+    """Fetch only one folder's immediate children; nested folders load on demand."""
+    return _list_folder_children(folder_id, service_token)
 
 
 @st.cache_data(ttl=1800, max_entries=2500, show_spinner=False)
@@ -129,34 +90,17 @@ class DriveGallery:
             self.credentials.refresh(Request())
         return self.credentials.token
 
-    def get_index(self, force=False):
+    def get_folder_children(self, folder_id, force=False):
         if force:
-            _cached_gallery_index.clear()
-        return _cached_gallery_index(self.root_id, self.token())
+            _cached_folder_children.clear()
+        return _cached_folder_children(str(folder_id), self.token())
 
     def invalidate_index(self):
-        _cached_gallery_index.clear()
+        _cached_folder_children.clear()
         _cached_thumbnail.clear()
 
-    def descendant_folder_ids(self, folder_id, index):
-        by_parent = {}
-        for child_id, parent_id in index["folder_parent"].items():
-            if parent_id is not None:
-                by_parent.setdefault(parent_id, []).append(child_id)
-        allowed = {folder_id}
-        stack = [folder_id]
-        while stack:
-            parent = stack.pop()
-            for child in by_parent.get(parent, []):
-                if child not in allowed:
-                    allowed.add(child)
-                    stack.append(child)
-        return allowed
-
-    def media_in_folder(self, folder_id, recursive=True):
-        index = self.get_index()
-        allowed = self.descendant_folder_ids(folder_id, index) if recursive else {folder_id}
-        return [item for item in index["media"] if item.get("_gallery_parent_id") in allowed]
+    def folder_items(self, folder_id, force=False):
+        return self.get_folder_children(folder_id, force=force)
 
     def fetch_thumbnails(self, items, max_workers=12):
         token = self.token()
@@ -167,9 +111,13 @@ class DriveGallery:
             return list(pool.map(one, items))
 
     def download_bytes(self, item):
-        # The caller passes the item from the authorized central gallery index.
-        index = self.get_index()
-        if item["id"] not in index["media_by_id"]:
+        # Verify the item is an immediate child of its claimed parent folder.
+        parent_id = item.get("_gallery_parent_id") or (item.get("parents") or [None])[0]
+        if not parent_id:
+            raise PermissionError("This file is outside the configured gallery.")
+        allowed = self.get_folder_children(parent_id)
+        if not any(child.get("id") == item.get("id") and child.get("mimeType", "").startswith(("image/", "video/"))
+                   for child in allowed):
             raise PermissionError("This file is outside the configured gallery.")
         response = self.session.get(
             f"{FILES_URL}/{item['id']}",
