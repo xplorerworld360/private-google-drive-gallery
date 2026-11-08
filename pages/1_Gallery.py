@@ -60,20 +60,20 @@ if root_folders:
 else:
     st.caption("No subfolders found in the main gallery folder.")
 
-current_folder_id = st.session_state.shared_gallery_folder
-if current_folder_id != root_id:
-    current_folder = st.session_state.get("shared_gallery_current_folder", {"name": "Selected folder"})
-    back_col, name_col = st.columns([1, 5])
-    with back_col:
-        if st.button("← All albums", use_container_width=True):
-            st.session_state.shared_gallery_folder = root_id
-            st.session_state.pop("shared_gallery_current_folder", None)
-            st.rerun()
-    with name_col:
-        st.markdown(f"**Folder selected:** {current_folder.get('name', 'Selected folder')}")
+# current_folder_id = st.session_state.shared_gallery_folder
+# if current_folder_id != root_id:
+#     current_folder = st.session_state.get("shared_gallery_current_folder", {"name": "Selected folder"})
+#     back_col, name_col = st.columns([1, 5])
+#     with back_col:
+#         if st.button("← All albums", use_container_width=True):
+#             st.session_state.shared_gallery_folder = root_id
+#             st.session_state.pop("shared_gallery_current_folder", None)
+#             st.rerun()
+#     with name_col:
+#         st.markdown(f"**Folder selected:** {current_folder.get('name', 'Selected folder')}")
 
 # Global media explorer includes all nested folders and root-level media.
-st.markdown("---")
+# st.markdown("---")
 st.markdown("### All photos & videos")
 st.caption(f"{len(media_all):,} media files found across {len(folders):,} folders.")
 
